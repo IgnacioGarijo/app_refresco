@@ -1,27 +1,34 @@
 package es.personal.avisosairef.data.network
 
+import android.content.Context
 import es.personal.avisosairef.Constants
+import es.personal.avisosairef.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.security.KeyStore
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.TrustManager
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 interface AirefFetcher {
     suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult
 }
 
-class AirefHttpClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
-        .build()
+class AirefHttpClient private constructor(
+    private val client: OkHttpClient
 ) : AirefFetcher {
+    constructor(context: Context) : this(buildClient(context.applicationContext))
+
+    constructor() : this(buildClient(null))
+
     override suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)
@@ -56,5 +63,70 @@ class AirefHttpClient(
 
     private companion object {
         const val MAX_BYTES = 1_500_000L
+
+        fun buildClient(context: Context?): OkHttpClient {
+            val builder = OkHttpClient.Builder()
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .callTimeout(30, TimeUnit.SECONDS)
+
+            if (context != null) {
+                val trustManager = CompositeTrustManager(
+                    listOf(systemTrustManager(), fnmtTrustManager(context))
+                )
+                val sslContext = SSLContext.getInstance("TLS").apply {
+                    init(null, arrayOf<TrustManager>(trustManager), null)
+                }
+                builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            }
+
+            return builder.build()
+        }
+
+        fun systemTrustManager(): X509TrustManager {
+            val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            factory.init(null as KeyStore?)
+            return factory.trustManagers.filterIsInstance<X509TrustManager>().single()
+        }
+
+        fun fnmtTrustManager(context: Context): X509TrustManager {
+            val certificateFactory = CertificateFactory.getInstance("X.509")
+            val certificate = context.resources.openRawResource(R.raw.fnmt_ac_componentes_informaticos).use {
+                certificateFactory.generateCertificate(it)
+            }
+            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                setCertificateEntry("fnmt_ac_componentes_informaticos", certificate)
+            }
+            val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            factory.init(keyStore)
+            return factory.trustManagers.filterIsInstance<X509TrustManager>().single()
+        }
     }
+}
+
+private class CompositeTrustManager(
+    private val delegates: List<X509TrustManager>
+) : X509TrustManager {
+    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
+        delegates.first().checkClientTrusted(chain, authType)
+    }
+
+    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+        val failures = mutableListOf<Throwable>()
+        for (delegate in delegates) {
+            try {
+                delegate.checkServerTrusted(chain, authType)
+                return
+            } catch (ex: Throwable) {
+                failures += ex
+            }
+        }
+        throw failures.lastOrNull() ?: SSLHandshakeException("No trust manager accepted the server certificate")
+    }
+
+    override fun getAcceptedIssuers(): Array<X509Certificate> =
+        delegates.flatMap { it.acceptedIssuers.asIterable() }.toTypedArray()
 }

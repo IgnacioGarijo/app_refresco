@@ -113,6 +113,7 @@ app/src/main/java/es/personal/avisosairef/
 ## Versiones principales
 
 - Android Gradle Plugin: 8.13.2
+- Version de la app: 1.0.1
 - Kotlin: 2.3.21
 - Compose BOM: 2026.06.01
 - WorkManager: 2.11.2
@@ -164,7 +165,7 @@ Tamano:
 SHA-256:
 
 ```text
-3234FD9298B34C0E9EDA76BBB53568EAE39BCDD9810EEEEB83E155ECDBD6644A
+5AA26626C87E209BDF9ED044BDCDA3795940B61F59CE3F3EC49C6F6237EF355A
 ```
 
 Para recalcularlo:
