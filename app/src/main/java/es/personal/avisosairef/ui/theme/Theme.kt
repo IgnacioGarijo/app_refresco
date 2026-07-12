@@ -20,7 +20,7 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun AvisosAirefTheme(content: @Composable () -> Unit) {
+fun RefrescoWebTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
         content = content

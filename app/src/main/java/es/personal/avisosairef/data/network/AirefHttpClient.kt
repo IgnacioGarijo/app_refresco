@@ -32,7 +32,7 @@ class AirefHttpClient private constructor(
     override suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "AvisosAIReF/1.0 (Android personal monitor; +https://www.airef.es)")
+            .header("User-Agent", "RefrescoWeb/1.0 (Android personal web monitor)")
             .header("Accept", "text/html,application/xhtml+xml")
             .header("Accept-Encoding", "gzip")
             .apply {

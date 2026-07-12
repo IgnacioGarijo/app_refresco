@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AvisosAIReF"
+rootProject.name = "RefrescoWeb"
 include(":app")

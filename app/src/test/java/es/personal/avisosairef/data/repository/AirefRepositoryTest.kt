@@ -24,7 +24,7 @@ class AirefRepositoryTest {
         val outcome = repository.checkNow()
         assertTrue(outcome.firstReferenceCreated)
         assertTrue(outcome.newPublications.isEmpty())
-        assertEquals(1, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).knownPublications.size)
     }
 
     @Test
@@ -41,7 +41,7 @@ class AirefRepositoryTest {
     }
 
     @Test
-    fun otherSectionNewLinkDoesNotProduceNovelty() = runTest {
+    fun otherSectionNewLinkProducesNoveltyInWholePageMode() = runTest {
         val fetcher = QueueFetcher(
             FetchResult.Success(html("A", "/a.pdf"), null, null),
             FetchResult.Success(html("A", "/a.pdf", otherExtra = "<section><a href='/otro-nuevo.pdf'>Otro nuevo</a></section>"), null, null)
@@ -49,7 +49,7 @@ class AirefRepositoryTest {
         val repository = repositoryWith(fetcher)
         repository.checkNow()
         val outcome = repository.checkNow()
-        assertTrue(outcome.newPublications.isEmpty())
+        assertEquals(listOf("Otro nuevo"), outcome.newPublications.map { it.title })
     }
 
     @Test
@@ -61,7 +61,7 @@ class AirefRepositoryTest {
         val repository = repositoryWith(fetcher)
         repository.checkNow()
         repository.checkNow()
-        assertEquals(1, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).knownPublications.size)
     }
 
     @Test
@@ -74,7 +74,7 @@ class AirefRepositoryTest {
         repository.checkNow()
         val outcome = repository.checkNow()
         assertEquals(CheckStatus.Error, outcome.status)
-        assertEquals(1, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).knownPublications.size)
     }
 
     private fun repositoryWith(fetcher: AirefFetcher): AirefRepository {

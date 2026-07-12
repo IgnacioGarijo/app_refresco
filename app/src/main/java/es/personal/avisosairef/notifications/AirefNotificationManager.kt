@@ -44,24 +44,23 @@ class AirefNotificationManager(private val context: Context) {
         )
         val style = NotificationCompat.InboxStyle()
         publications.take(6).forEach { style.addLine(it.title) }
-        if (publications.size > 1) style.setSummaryText("${publications.size} nuevas publicaciones")
+        if (publications.size > 1) style.setSummaryText("${publications.size} enlaces nuevos")
 
-        val body = if (publications.size == 1) first.title else "${publications.size} nuevas publicaciones detectadas"
+        val body = if (publications.size == 1) first.title else "${publications.size} enlaces nuevos detectados"
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Nueva publicación de AIReF")
+            .setContentTitle("Cambio detectado en una pagina")
             .setContentText(body)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
         if (publications.size > 1) builder.setStyle(style)
-        val notification = builder.build()
 
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
     }
 
     companion object {
-        const val CHANNEL_ID = "new_airef_publications"
+        const val CHANNEL_ID = "web_refresh_changes"
         const val NOTIFICATION_ID = 20251022
     }
 }

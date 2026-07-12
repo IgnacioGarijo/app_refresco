@@ -6,11 +6,23 @@ import org.junit.Test
 
 class AirefPublicationsParserTest {
     private val parser = AirefPublicationsParser()
+    private val target = "Experto/a en evaluacion de politicas publicas"
 
     @Test
-    fun normalPageExtractsOnlyTargetSection() {
-        val result = parser.parse(page(targetLinks = listOf("A" to "/docs/a.pdf", "B" to "https://www.boe.es/b.pdf"))) as ParserResult.Success
+    fun filteredModeExtractsOnlyTargetSection() {
+        val result = parser.parse(
+            page(targetLinks = listOf("A" to "/docs/a.pdf", "B" to "https://www.boe.es/b.pdf")),
+            targetTitle = target
+        ) as ParserResult.Success
         assertEquals(listOf("A", "B"), result.publications.map { it.title })
+    }
+
+    @Test
+    fun defaultModeExtractsWholePage() {
+        val result = parser.parse(
+            page(targetLinks = listOf("A" to "/docs/a.pdf"), otherLinks = listOf("Otro" to "/docs/otro.pdf"))
+        ) as ParserResult.Success
+        assertEquals(setOf("A", "Otro"), result.publications.map { it.title }.toSet())
     }
 
     @Test
@@ -21,28 +33,31 @@ class AirefPublicationsParserTest {
     }
 
     @Test
-    fun newLinkInOtherSectionIsIgnored() {
-        val result = parser.parse(page(otherTitle = "Analista macroeconómico", otherLinks = listOf("Otro nuevo" to "/docs/otro.pdf"))) as ParserResult.Success
+    fun newLinkInOtherSectionIsIgnoredWhenFilterIsEnabled() {
+        val result = parser.parse(
+            page(otherTitle = "Analista macroeconomico", otherLinks = listOf("Otro nuevo" to "/docs/otro.pdf")),
+            targetTitle = target
+        ) as ParserResult.Success
         assertEquals(listOf("Base"), result.publications.map { it.title })
     }
 
     @Test
     fun duplicatedLinksAreRemoved() {
         val result = parser.parse(page(targetLinks = listOf("A" to "/docs/a.pdf", "A duplicado" to "/docs/a.pdf?utm_source=x"))) as ParserResult.Success
-        assertEquals(1, result.publications.size)
+        assertEquals(2, result.publications.size)
     }
 
     @Test
-    fun spacesAndCaseDoNotBreakHeading() {
-        val html = page(title = "  EXPERTO/A   EN EVALUACIÓN DE POLÍTICAS   PÚBLICAS  ")
-        val result = parser.parse(html) as ParserResult.Success
+    fun spacesAndCaseDoNotBreakHeadingInFilteredMode() {
+        val html = page(title = "  EXPERTO/A   EN EVALUACION DE POLITICAS   PUBLICAS  ")
+        val result = parser.parse(html, targetTitle = target) as ParserResult.Success
         assertEquals(1, result.publications.size)
     }
 
     @Test
     fun relativeUrlBecomesAbsolute() {
         val result = parser.parse(page(targetLinks = listOf("Relativo" to "/wp-content/x.pdf"))) as ParserResult.Success
-        assertEquals("https://www.airef.es/wp-content/x.pdf", result.publications.first().url)
+        assertEquals("https://www.airef.es/wp-content/x.pdf", result.publications.first { it.title == "Relativo" }.url)
     }
 
     @Test
@@ -53,52 +68,60 @@ class AirefPublicationsParserTest {
     }
 
     @Test
-    fun missingTargetFails() {
-        val result = parser.parse("<html><body><p>Otro puesto</p><a href='/a.pdf'>A</a></body></html>")
+    fun missingTargetFailsOnlyWhenFilterIsEnabled() {
+        val result = parser.parse("<html><body><main><a href='/a.pdf'>A</a></main></body></html>", targetTitle = target)
         assertTrue(result is ParserResult.Failure && result.reason == ParserFailureReason.TargetSectionMissing)
     }
 
     @Test
+    fun missingTargetDoesNotFailInWholePageMode() {
+        val result = parser.parse("<html><body><main><a href='/a.pdf'>A</a></main></body></html>") as ParserResult.Success
+        assertEquals(listOf("A"), result.publications.map { it.title })
+    }
+
+    @Test
     fun unexpectedEmptyFailsWhenPreviousStateHadDocuments() {
-        val result = parser.parse(page(targetLinks = emptyList()), previousKnownCount = 3)
+        val result = parser.parse("<html><body><main></main></body></html>", previousKnownCount = 3)
         assertTrue(result is ParserResult.Failure && result.reason == ParserFailureReason.EmptyUnexpected)
     }
 
     @Test
-    fun moderateStructureChangeUsesFallback() {
+    fun moderateStructureChangeUsesFallbackInFilteredMode() {
         val html = """
             <html><body>
             <article>
-              <div><span>Experto/a en evaluación de políticas públicas</span>
+              <div><span>Experto/a en evaluacion de politicas publicas</span>
                 <div class="downloads"><a href="/fallback.pdf">Documento fallback</a></div>
               </div>
             </article>
             </body></html>
         """.trimIndent()
-        val result = parser.parse(html) as ParserResult.Success
+        val result = parser.parse(html, targetTitle = target) as ParserResult.Success
         assertEquals("Documento fallback", result.publications.first().title)
     }
 
     private fun page(
-        title: String = "Experto/a en evaluación de políticas públicas",
+        title: String = "Experto/a en evaluacion de politicas publicas",
         targetLinks: List<Pair<String, String>> = listOf("Base" to "/docs/base.pdf"),
-        otherTitle: String = "Experto/a en comunicación",
+        otherTitle: String = "Experto/a en comunicacion",
         otherLinks: List<Pair<String, String>> = listOf("Otro" to "/docs/otro-base.pdf")
     ): String = """
         <html><body>
-          <section class="elementor-section elementor-top-section">
-            <div class="elementor-container">
-              <div class="elementor-column">
-                <div class="elementor-widget-wrap">
-                  <div class="elementor-widget-text-editor"><div><p>$title</p></div></div>
-                  ${targetLinks.joinToString("\n") { "<section><p><a href='${it.second}'>${it.first}</a></p></section>" }}
-                  <div class="elementor-widget-divider"></div>
-                  <div class="elementor-widget-text-editor"><div><p>$otherTitle</p></div></div>
-                  ${otherLinks.joinToString("\n") { "<section><p><a href='${it.second}'>${it.first}</a></p></section>" }}
+          <main><article>
+            <section class="elementor-section elementor-top-section">
+              <div class="elementor-container">
+                <div class="elementor-column">
+                  <div class="elementor-widget-wrap">
+                    <div class="elementor-widget-text-editor"><div><p>$title</p></div></div>
+                    ${targetLinks.joinToString("\n") { "<section><p><a href='${it.second}'>${it.first}</a></p></section>" }}
+                    <div class="elementor-widget-divider"></div>
+                    <div class="elementor-widget-text-editor"><div><p>$otherTitle</p></div></div>
+                    ${otherLinks.joinToString("\n") { "<section><p><a href='${it.second}'>${it.first}</a></p></section>" }}
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
+          </article></main>
         </body></html>
     """.trimIndent()
 }

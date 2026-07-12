@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.AvisosAIReF" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.RefrescoWeb" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:colorAccent">#990033</item>
     </style>

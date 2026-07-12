@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -49,7 +50,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import es.personal.avisosairef.data.storage.AppState
-import es.personal.avisosairef.ui.theme.AvisosAirefTheme
+import es.personal.avisosairef.ui.theme.RefrescoWebTheme
 import es.personal.avisosairef.worker.AirefWorkScheduler
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,8 +65,8 @@ class MainActivity : ComponentActivity() {
         val repository = ServiceLocator.repository(this)
         val viewModel = ViewModelProvider(this, MainViewModel.factory(repository))[MainViewModel::class.java]
         setContent {
-            AvisosAirefTheme {
-                AirefScreen(viewModel)
+            RefrescoWebTheme {
+                WebRefreshScreen(viewModel)
             }
         }
     }
@@ -91,11 +92,11 @@ class MainViewModel(
         }
     }
 
-    fun updateSettings(context: android.content.Context, url: String, intervalMinutes: Long) {
+    fun updateSettings(context: android.content.Context, url: String, intervalMinutes: Long, sectionFilterEnabled: Boolean) {
         viewModelScope.launch {
             settingsError = null
             runCatching {
-                repository.updateSettings(url, intervalMinutes)
+                repository.updateSettings(url, intervalMinutes, sectionFilterEnabled)
                 if (state.value.monitoringEnabled) {
                     AirefWorkScheduler.schedulePeriodic(context, intervalMinutes)
                 }
@@ -127,12 +128,13 @@ class MainViewModel(
 }
 
 @Composable
-private fun AirefScreen(viewModel: MainViewModel) {
+private fun WebRefreshScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var showResetDialog by remember { mutableStateOf(false) }
     var urlDraft by remember { mutableStateOf(state.monitoredUrl) }
     var intervalDraft by remember { mutableStateOf(state.intervalMinutes) }
+    var sectionFilterDraft by remember { mutableStateOf(state.sectionFilterEnabled) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     LaunchedEffect(state.monitoredUrl) {
@@ -141,6 +143,10 @@ private fun AirefScreen(viewModel: MainViewModel) {
 
     LaunchedEffect(state.intervalMinutes) {
         intervalDraft = state.intervalMinutes
+    }
+
+    LaunchedEffect(state.sectionFilterEnabled) {
+        sectionFilterDraft = state.sectionFilterEnabled
     }
 
     LaunchedEffect(state.monitoringEnabled) {
@@ -167,7 +173,7 @@ private fun AirefScreen(viewModel: MainViewModel) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("URL monitorizada", fontWeight = FontWeight.SemiBold)
+                        Text("Pagina vigilada", fontWeight = FontWeight.SemiBold)
                         OutlinedTextField(
                             value = urlDraft,
                             onValueChange = { urlDraft = it },
@@ -176,8 +182,17 @@ private fun AirefScreen(viewModel: MainViewModel) {
                             maxLines = 4,
                             supportingText = { Text("Debe ser HTTPS. Si cambias la URL se creara una nueva referencia inicial.") }
                         )
-                        Text("Apartado vigilado", fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.target_section))
+                        Text("Filtro opcional", fontWeight = FontWeight.SemiBold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = sectionFilterDraft, onCheckedChange = { sectionFilterDraft = it })
+                            Text("Usar filtro de apartado preconfigurado")
+                        }
+                        if (sectionFilterDraft) {
+                            Text(
+                                stringResource(R.string.target_section),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.monitoring_active))
                             Switch(checked = state.monitoringEnabled, onCheckedChange = { viewModel.setMonitoring(context, it) })
@@ -193,13 +208,17 @@ private fun AirefScreen(viewModel: MainViewModel) {
                             }
                         }
                         Button(
-                            onClick = { viewModel.updateSettings(context, urlDraft, intervalDraft) },
-                            enabled = urlDraft.trim() != state.monitoredUrl || intervalDraft != state.intervalMinutes
+                            onClick = {
+                                viewModel.updateSettings(context, urlDraft, intervalDraft, sectionFilterDraft)
+                            },
+                            enabled = urlDraft.trim() != state.monitoredUrl ||
+                                intervalDraft != state.intervalMinutes ||
+                                sectionFilterDraft != state.sectionFilterEnabled
                         ) {
                             Text("Guardar ajustes")
                         }
                         viewModel.settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        Text("Android puede retrasar las comprobaciones para ahorrar bateria.")
+                        Text("Android puede retrasar las comprobaciones para ahorrar bateria. La revision analiza el HTML de la pagina y no descarga PDFs, imagenes ni scripts.")
                     }
                 }
             }
@@ -211,7 +230,7 @@ private fun AirefScreen(viewModel: MainViewModel) {
                         Text("Ultima comprobacion correcta: ${state.lastSuccessAtMillis.formatDate()}")
                         Text("Resultado: ${state.lastResult}")
                         Text("Ultimo cambio detectado: ${state.lastChangeAtMillis.formatDate()}")
-                        Text("Documentos conocidos: ${state.knownPublications.size}")
+                        Text("Enlaces conocidos: ${state.knownPublications.size}")
                         state.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
                     }
                 }
@@ -224,7 +243,7 @@ private fun AirefScreen(viewModel: MainViewModel) {
                     OutlinedButton(onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.monitoredUrl)))
                     }) {
-                        Text(stringResource(R.string.open_airef))
+                        Text(stringResource(R.string.open_page))
                     }
                 }
                 if (viewModel.checking) {
@@ -236,7 +255,7 @@ private fun AirefScreen(viewModel: MainViewModel) {
                 }
             }
             item {
-                Text("Ultimos documentos detectados", style = MaterialTheme.typography.titleMedium)
+                Text("Ultimos enlaces detectados", style = MaterialTheme.typography.titleMedium)
             }
             if (state.recentPublications.isEmpty()) {
                 item { Text("Aun no hay novedades posteriores a la referencia inicial.") }
