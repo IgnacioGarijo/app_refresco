@@ -5,5 +5,6 @@ object Constants {
     const val DefaultBaseUrl = "https://www.airef.es"
     const val TargetSection = "Experto/a en evaluacion de politicas publicas"
     const val UniquePeriodicWork = "web_refresh_periodic_check"
+    const val LegacyUniquePeriodicWork = "airef_publications_periodic_check"
     const val DefaultIntervalMinutes = 30L
 }

@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 object AirefWorkScheduler {
     fun schedulePeriodic(context: Context, intervalMinutes: Long = es.personal.avisosairef.Constants.DefaultIntervalMinutes) {
         val safeInterval = intervalMinutes.coerceAtLeast(15)
+        val workManager = WorkManager.getInstance(context)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
@@ -24,7 +25,8 @@ object AirefWorkScheduler {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofMinutes(10))
             .build()
 
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        workManager.cancelUniqueWork(Constants.LegacyUniquePeriodicWork)
+        workManager.enqueueUniquePeriodicWork(
             Constants.UniquePeriodicWork,
             ExistingPeriodicWorkPolicy.UPDATE,
             request
@@ -32,7 +34,9 @@ object AirefWorkScheduler {
     }
 
     fun cancelPeriodic(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(Constants.UniquePeriodicWork)
+        val workManager = WorkManager.getInstance(context)
+        workManager.cancelUniqueWork(Constants.UniquePeriodicWork)
+        workManager.cancelUniqueWork(Constants.LegacyUniquePeriodicWork)
     }
 
     fun enqueueOneTime(context: Context) {
