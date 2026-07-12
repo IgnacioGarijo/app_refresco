@@ -16,6 +16,8 @@ class RefrescoWebApp : Application() {
             val state = ServiceLocator.repository(this@RefrescoWebApp).state.first()
             if (state.monitoringEnabled) {
                 AirefWorkScheduler.schedulePeriodic(this@RefrescoWebApp, state.intervalMinutes)
+            } else {
+                AirefWorkScheduler.cancelPeriodic(this@RefrescoWebApp)
             }
         }
     }
