@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Avisos AIReF</string>
+    <string name="target_section">Experto/a en evaluación de políticas públicas</string>
+    <string name="monitoring_active">Monitorización activa</string>
+    <string name="check_now">Comprobar ahora</string>
+    <string name="open_airef">Ver página de AIReF</string>
+    <string name="reset_reference">Restablecer referencia</string>
+    <string name="reset_confirm_title">Restablecer referencia</string>
+    <string name="reset_confirm_body">Se borrarán los documentos conocidos. La próxima comprobación creará una referencia inicial sin notificar.</string>
+    <string name="confirm">Confirmar</string>
+    <string name="cancel">Cancelar</string>
+    <string name="notification_channel_name">Nuevas publicaciones AIReF</string>
+    <string name="notification_channel_description">Avisos cuando aparecen documentos nuevos en el apartado vigilado.</string>
+</resources>

@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+dist/*.sha256
+signing/
+*.jks
+*.keystore
+.gradle-tmp/
+headers.tmp
+airef.html
+.android-sdk/
