@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import es.personal.avisosairef.ServiceLocator
 import es.personal.avisosairef.data.repository.CheckStatus
 import es.personal.avisosairef.notifications.AirefNotificationManager
+import es.personal.avisosairef.notifications.TelegramNotifier
 import kotlinx.coroutines.flow.first
 
 class AirefCheckWorker(
@@ -16,13 +17,23 @@ class AirefCheckWorker(
         val repository = ServiceLocator.repository(applicationContext)
         if (!repositorySnapshotEnabled(repository)) return Result.success()
 
-        val outcome = repository.checkNow()
-        if (outcome.status == CheckStatus.Success && outcome.newPublications.isNotEmpty() && !outcome.firstReferenceCreated) {
-            AirefNotificationManager(applicationContext).notifyNewPublications(outcome.newPublications)
-        }
+        val outcomes = repository.checkDueMonitors()
+        val state = repository.state.first()
+        outcomes
+            .filter { it.status == CheckStatus.Success && it.newPublications.isNotEmpty() && !it.firstReferenceCreated }
+            .forEach {
+                AirefNotificationManager(applicationContext).notifyNewPublications(it.monitorName ?: "Pagina vigilada", it.newPublications)
+                if (state.telegramEnabled) {
+                    TelegramNotifier().send(
+                        state.telegramBotToken,
+                        state.telegramChatId,
+                        it.monitorName ?: "Pagina vigilada",
+                        it.newPublications
+                    )
+                }
+            }
         return when {
-            outcome.shouldRetry -> Result.retry()
-            outcome.status == CheckStatus.Error -> Result.success()
+            outcomes.any { it.shouldRetry } -> Result.retry()
             else -> Result.success()
         }
     }

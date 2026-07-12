@@ -16,7 +16,7 @@ interface StateStore {
     val state: Flow<AppState>
     suspend fun current(): AppState
     suspend fun update(transform: (AppState) -> AppState): AppState
-    suspend fun resetReference()
+    suspend fun resetReference(monitorId: String)
 }
 
 class AirefStateStore(private val context: Context) : StateStore {
@@ -38,17 +38,25 @@ class AirefStateStore(private val context: Context) : StateStore {
         return updated
     }
 
-    override suspend fun resetReference() {
+    override suspend fun resetReference(monitorId: String) {
         update {
             it.copy(
-                knownPublications = emptyList(),
-                unseenPublications = emptyList(),
-                recentPublications = emptyList(),
-                eTag = null,
-                lastModified = null,
-                lastChangeAtMillis = null,
-                lastError = null,
-                lastResult = "Referencia pendiente"
+                monitors = it.monitors.map { monitor ->
+                    if (monitor.id != monitorId) {
+                        monitor
+                    } else {
+                        monitor.copy(
+                            knownPublications = emptyList(),
+                            unseenPublications = emptyList(),
+                            recentPublications = emptyList(),
+                            eTag = null,
+                            lastModified = null,
+                            lastChangeAtMillis = null,
+                            lastError = null,
+                            lastResult = "Referencia pendiente"
+                        )
+                    }
+                }
             )
         }
     }

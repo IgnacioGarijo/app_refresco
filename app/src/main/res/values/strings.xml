@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Refresco Web</string>
     <string name="target_section">Experto/a en evaluacion de politicas publicas</string>
-    <string name="monitoring_active">Revision activa</string>
+    <string name="monitoring_active">Revision global activa</string>
     <string name="check_now">Comprobar ahora</string>
     <string name="open_page">Abrir pagina</string>
     <string name="reset_reference">Restablecer referencia</string>

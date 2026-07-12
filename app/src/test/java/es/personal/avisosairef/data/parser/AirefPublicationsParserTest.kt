@@ -100,6 +100,30 @@ class AirefPublicationsParserTest {
         assertEquals("Documento fallback", result.publications.first().title)
     }
 
+    @Test
+    fun cssSelectorLimitsExtraction() {
+        val html = """
+            <html><body><main>
+              <section class="wanted"><a href="/a.pdf">A</a></section>
+              <section class="ignored"><a href="/b.pdf">B</a></section>
+            </main></body></html>
+        """.trimIndent()
+        val result = parser.parse(html, cssSelector = ".wanted") as ParserResult.Success
+        assertEquals(listOf("A"), result.publications.map { it.title })
+    }
+
+    @Test
+    fun keywordFilterKeepsMatchingLinksOnly() {
+        val html = """
+            <html><body><main>
+              <a href="/calendario.pdf">Calendario provisional</a>
+              <a href="/modelo.pdf">Modelo de solicitud</a>
+            </main></body></html>
+        """.trimIndent()
+        val result = parser.parse(html, includeKeywords = "calendario") as ParserResult.Success
+        assertEquals(listOf("Calendario provisional"), result.publications.map { it.title })
+    }
+
     private fun page(
         title: String = "Experto/a en evaluacion de politicas publicas",
         targetLinks: List<Pair<String, String>> = listOf("Base" to "/docs/base.pdf"),

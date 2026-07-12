@@ -9,7 +9,9 @@ import es.personal.avisosairef.data.parser.AirefPublicationsParser
 import es.personal.avisosairef.data.parser.ParserResult
 import es.personal.avisosairef.data.storage.AppState
 import es.personal.avisosairef.data.storage.StateStore
+import es.personal.avisosairef.data.storage.WebMonitor
 import kotlinx.coroutines.flow.Flow
+import java.util.UUID
 
 class AirefRepository(
     private val store: StateStore,
@@ -23,47 +25,128 @@ class AirefRepository(
         store.update { it.copy(monitoringEnabled = enabled) }
     }
 
-    suspend fun updateSettings(monitoredUrl: String, intervalMinutes: Long, sectionFilterEnabled: Boolean) {
-        val cleanUrl = monitoredUrl.trim()
-        require(cleanUrl.startsWith("https://")) { "La URL debe empezar por https://" }
+    suspend fun updateTelegramSettings(enabled: Boolean, botToken: String, chatId: String) {
         store.update {
-            if (it.monitoredUrl == cleanUrl) {
-                it.copy(intervalMinutes = intervalMinutes, sectionFilterEnabled = sectionFilterEnabled)
-            } else {
-                it.copy(
-                    monitoredUrl = cleanUrl,
-                    intervalMinutes = intervalMinutes,
-                    sectionFilterEnabled = sectionFilterEnabled,
-                    knownPublications = emptyList(),
-                    unseenPublications = emptyList(),
-                    recentPublications = emptyList(),
-                    eTag = null,
-                    lastModified = null,
-                    lastSuccessAtMillis = null,
-                    lastChangeAtMillis = null,
-                    lastError = null,
-                    lastResult = "Referencia pendiente: URL actualizada."
-                )
-            }
+            it.copy(
+                telegramEnabled = enabled,
+                telegramBotToken = botToken.trim(),
+                telegramChatId = chatId.trim()
+            )
         }
     }
 
-    suspend fun resetReference() {
-        store.resetReference()
+    suspend fun selectMonitor(monitorId: String) {
+        store.update { state ->
+            if (state.monitors.any { it.id == monitorId }) state.copy(selectedMonitorId = monitorId) else state
+        }
     }
 
-    suspend fun markUnseenAsViewed() {
-        store.update { it.copy(unseenPublications = emptyList()) }
+    suspend fun upsertMonitor(
+        id: String?,
+        name: String,
+        folder: String,
+        url: String,
+        intervalMinutes: Long,
+        enabled: Boolean,
+        sectionFilterEnabled: Boolean,
+        cssSelector: String,
+        includeKeywords: String
+    ): String {
+        val cleanUrl = url.trim()
+        require(cleanUrl.startsWith("https://")) { "La URL debe empezar por https://" }
+        require(name.trim().isNotBlank()) { "El nombre no puede estar vacio." }
+
+        val cleanId = id?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+        store.update { state ->
+            val existing = state.monitors.firstOrNull { it.id == cleanId }
+            val updated = if (existing == null) {
+                WebMonitor(
+                    id = cleanId,
+                    name = name.trim(),
+                    folder = folder.trim().ifBlank { "Personal" },
+                    monitoredUrl = cleanUrl,
+                    intervalMinutes = intervalMinutes,
+                    enabled = enabled,
+                    sectionFilterEnabled = sectionFilterEnabled,
+                    cssSelector = cssSelector.trim(),
+                    includeKeywords = includeKeywords.trim()
+                )
+            } else {
+                val urlChanged = existing.monitoredUrl != cleanUrl
+                existing.copy(
+                    name = name.trim(),
+                    folder = folder.trim().ifBlank { "Personal" },
+                    monitoredUrl = cleanUrl,
+                    intervalMinutes = intervalMinutes,
+                    enabled = enabled,
+                    sectionFilterEnabled = sectionFilterEnabled,
+                    cssSelector = cssSelector.trim(),
+                    includeKeywords = includeKeywords.trim(),
+                    knownPublications = if (urlChanged) emptyList() else existing.knownPublications,
+                    unseenPublications = if (urlChanged) emptyList() else existing.unseenPublications,
+                    recentPublications = if (urlChanged) emptyList() else existing.recentPublications,
+                    eTag = if (urlChanged) null else existing.eTag,
+                    lastModified = if (urlChanged) null else existing.lastModified,
+                    lastSuccessAtMillis = if (urlChanged) null else existing.lastSuccessAtMillis,
+                    lastChangeAtMillis = if (urlChanged) null else existing.lastChangeAtMillis,
+                    lastError = if (urlChanged) null else existing.lastError,
+                    lastResult = if (urlChanged) "Referencia pendiente: URL actualizada." else existing.lastResult
+                )
+            }
+            state.copy(
+                monitors = (state.monitors.filterNot { it.id == cleanId } + updated).sortedWith(compareBy<WebMonitor> { it.folder.lowercase() }.thenBy { it.name.lowercase() }),
+                selectedMonitorId = cleanId
+            )
+        }
+        return cleanId
     }
 
-    suspend fun checkNow(): CheckOutcome {
-        val before = store.current()
+    suspend fun deleteMonitor(monitorId: String) {
+        store.update { state ->
+            val remaining = state.monitors.filterNot { it.id == monitorId }.ifEmpty { listOf(WebMonitor.default()) }
+            state.copy(
+                monitors = remaining,
+                selectedMonitorId = remaining.firstOrNull { it.id == state.selectedMonitorId }?.id ?: remaining.first().id
+            )
+        }
+    }
+
+    suspend fun resetReference(monitorId: String) {
+        store.resetReference(monitorId)
+    }
+
+    suspend fun markUnseenAsViewed(monitorId: String) {
+        store.update { state ->
+            state.copy(monitors = state.monitors.map { if (it.id == monitorId) it.copy(unseenPublications = emptyList()) else it })
+        }
+    }
+
+    suspend fun checkNow(monitorId: String? = null): CheckOutcome {
+        val state = store.current()
+        val monitor = monitorId?.let { id -> state.monitors.firstOrNull { it.id == id } } ?: state.selectedMonitor
+        return checkMonitor(monitor)
+    }
+
+    suspend fun checkDueMonitors(): List<CheckOutcome> {
+        val state = store.current()
+        if (!state.monitoringEnabled) return emptyList()
         val now = clock()
-        store.update { it.copy(lastAttemptAtMillis = now) }
+        val due = state.monitors.filter { monitor ->
+            monitor.enabled && ((monitor.lastAttemptAtMillis ?: 0L) + monitor.intervalMinutes.coerceAtLeast(15) * 60_000L <= now)
+        }
+        return due.map { checkMonitor(it) }
+    }
 
-        return when (val fetch = httpClient.fetch(before.monitoredUrl, before.eTag, before.lastModified)) {
+    fun nextPeriodicIntervalMinutes(state: AppState): Long =
+        state.monitors.filter { it.enabled }.minOfOrNull { it.intervalMinutes.coerceAtLeast(15) } ?: Constants.DefaultIntervalMinutes
+
+    private suspend fun checkMonitor(monitor: WebMonitor): CheckOutcome {
+        val now = clock()
+        updateMonitor(monitor.id) { it.copy(lastAttemptAtMillis = now) }
+
+        return when (val fetch = httpClient.fetch(monitor.monitoredUrl, monitor.eTag, monitor.lastModified)) {
             is FetchResult.NotModified -> {
-                store.update {
+                updateMonitor(monitor.id) {
                     it.copy(
                         eTag = fetch.eTag,
                         lastModified = fetch.lastModified,
@@ -72,25 +155,32 @@ class AirefRepository(
                         lastResult = "Sin cambios: el servidor respondio 304."
                     )
                 }
-                CheckOutcome(CheckStatus.NotModified, "Sin cambios")
+                CheckOutcome(CheckStatus.NotModified, "Sin cambios", monitor.id, monitor.name)
             }
 
             is FetchResult.Failure -> {
                 val message = fetch.error.toUserMessage()
-                store.update { it.copy(lastError = message, lastResult = message) }
-                CheckOutcome(CheckStatus.Error, message, shouldRetry = fetch.error is FetchError.Network || fetch.error is FetchError.Http)
+                updateMonitor(monitor.id) { it.copy(lastError = message, lastResult = message) }
+                CheckOutcome(CheckStatus.Error, message, monitor.id, monitor.name, shouldRetry = fetch.error is FetchError.Network || fetch.error is FetchError.Http)
             }
 
-            is FetchResult.Success -> handleHtml(before, fetch, now)
+            is FetchResult.Success -> handleHtml(monitor, fetch, now)
         }
     }
 
-    private suspend fun handleHtml(before: AppState, fetch: FetchResult.Success, now: Long): CheckOutcome {
-        val targetSection = if (before.sectionFilterEnabled) Constants.TargetSection else null
-        return when (val parsed = parser.parse(fetch.html, before.monitoredUrl, previousKnownCount = before.knownPublications.size, targetTitle = targetSection)) {
+    private suspend fun handleHtml(monitor: WebMonitor, fetch: FetchResult.Success, now: Long): CheckOutcome {
+        val targetSection = if (monitor.sectionFilterEnabled) Constants.TargetSection else null
+        return when (val parsed = parser.parse(
+            fetch.html,
+            monitor.monitoredUrl,
+            previousKnownCount = monitor.knownPublications.size,
+            targetTitle = targetSection,
+            cssSelector = monitor.cssSelector,
+            includeKeywords = monitor.includeKeywords
+        )) {
             is ParserResult.Failure -> {
                 val message = "Error de parsing: ${parsed.message}"
-                store.update {
+                updateMonitor(monitor.id) {
                     it.copy(
                         eTag = fetch.eTag,
                         lastModified = fetch.lastModified,
@@ -98,14 +188,14 @@ class AirefRepository(
                         lastResult = message
                     )
                 }
-                CheckOutcome(CheckStatus.Error, message, shouldRetry = false)
+                CheckOutcome(CheckStatus.Error, message, monitor.id, monitor.name)
             }
 
             is ParserResult.Success -> {
                 val current = parsed.publications
-                if (before.knownPublications.isEmpty()) {
+                if (monitor.knownPublications.isEmpty()) {
                     val message = "Referencia inicial creada: ${current.size} enlaces encontrados."
-                    store.update {
+                    updateMonitor(monitor.id) {
                         it.copy(
                             knownPublications = current,
                             eTag = fetch.eTag,
@@ -115,14 +205,14 @@ class AirefRepository(
                             lastResult = message
                         )
                     }
-                    return CheckOutcome(CheckStatus.Success, message, firstReferenceCreated = true)
+                    return CheckOutcome(CheckStatus.Success, message, monitor.id, monitor.name, firstReferenceCreated = true)
                 }
 
-                val knownKeys = before.knownPublications.map { it.key }.toSet()
+                val knownKeys = monitor.knownPublications.map { it.key }.toSet()
                 val newItems = current.filterNot { it.key in knownKeys }
-                val recent = (newItems + before.recentPublications).distinctBy { it.key }.take(20)
+                val recent = (newItems + monitor.recentPublications).distinctBy { it.key }.take(20)
                 val message = if (newItems.isEmpty()) "Comprobacion correcta: sin novedades." else "Novedades detectadas: ${newItems.size}."
-                store.update {
+                updateMonitor(monitor.id) {
                     it.copy(
                         knownPublications = current,
                         unseenPublications = (newItems + it.unseenPublications).distinctBy { pub -> pub.key },
@@ -135,8 +225,14 @@ class AirefRepository(
                         lastResult = message
                     )
                 }
-                CheckOutcome(CheckStatus.Success, if (newItems.isEmpty()) "Sin novedades" else "${newItems.size} novedades", newItems)
+                CheckOutcome(CheckStatus.Success, if (newItems.isEmpty()) "Sin novedades" else "${newItems.size} novedades", monitor.id, monitor.name, newItems)
             }
+        }
+    }
+
+    private suspend fun updateMonitor(monitorId: String, transform: (WebMonitor) -> WebMonitor) {
+        store.update { state ->
+            state.copy(monitors = state.monitors.map { if (it.id == monitorId) transform(it) else it })
         }
     }
 

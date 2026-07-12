@@ -11,12 +11,14 @@ Tambien puede vigilar otras paginas HTTPS desde la propia interfaz.
 ## Que hace
 
 - Descarga solo el HTML de la pagina configurada.
+- Permite configurar varias paginas, con nombre, carpeta/etiqueta y frecuencia propia.
 - Extrae enlaces razonablemente relevantes del contenido principal: PDF, enlaces de WordPress uploads, BOE y enlaces cuyo texto parezca una resolucion, listado, nota, calendario, cronograma, plantilla o modelo.
-- Guarda una referencia inicial en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
+- Permite limitar una pagina por selector CSS opcional y por palabras clave.
+- Guarda una referencia inicial por pagina en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
 - En comprobaciones posteriores avisa si aparecen enlaces nuevos.
-- Conserva todo localmente con DataStore: URL, frecuencia, enlaces conocidos, ultimas novedades, ETag, Last-Modified, ultimos estados y errores.
+- Conserva todo localmente con DataStore: paginas, frecuencias, enlaces conocidos, ultimas novedades, ETag, Last-Modified, ultimos estados, errores y ajustes de Telegram.
 - Usa WorkManager con un trabajo periodico unico.
-- No usa servidores externos, Firebase, analitica, publicidad, cuentas ni APIs de pago.
+- No usa Firebase, analitica, publicidad, cuentas ni APIs de pago. Telegram es opcional y solo se contacta con `api.telegram.org` si lo activas.
 
 ## Cambio de enfoque
 
@@ -29,6 +31,26 @@ AIReF sigue apareciendo solo como:
 - Filtro opcional avanzado para el apartado "Experto/a en evaluacion de politicas publicas".
 
 Por defecto el filtro esta desactivado. Esto significa que la app vigila cambios relevantes en toda la pagina, que es el comportamiento recomendado para el uso actual.
+
+## Notificaciones externas
+
+La app soporta notificaciones Android y, opcionalmente, Telegram.
+
+Para Telegram debes crear un bot con BotFather y pegar localmente:
+
+- Bot token.
+- Chat ID.
+
+La app envia el aviso directamente a `https://api.telegram.org` cuando hay novedades. No hay servidor intermedio ni secretos versionados. WhatsApp no se implementa porque el envio automatico fiable requiere WhatsApp Business/API, backend o automatizaciones poco robustas. Correo automatico tampoco se incluye por la misma razon: sin SMTP/backend solo seria posible abrir un borrador manual.
+
+## Color y tema
+
+La identidad visual usa:
+
+- Primario: `#063347`.
+- Secundario: `#b3bec6`.
+
+El modo oscuro usa variantes mas claras para mantener contraste.
 
 ## Estrategia de extraccion
 
@@ -50,6 +72,7 @@ Modo opcional de apartado:
 
 - WorkManager con `enqueueUniquePeriodicWork`.
 - Nombre unico del trabajo: `web_refresh_periodic_check`.
+- En actualizaciones desde versiones antiguas se cancela el trabajo legado `airef_publications_periodic_check`.
 - `NetworkType.CONNECTED`.
 - `requiresBatteryNotLow(true)`.
 - No requiere estar cargando.
@@ -114,7 +137,7 @@ dist/RefrescoWeb.apk
 SHA-256:
 
 ```text
-09D621CBEE6636B2929E85FB485BA0BFA6A39D4DCD79B6680B2E495E9285054D
+53E7AF0F891A857D3C56DCCC5AB6246705B32999C3386EC71045ADFAAF3C9990
 ```
 
 Calcular hash local:
@@ -177,6 +200,8 @@ Antes de entregar una build se ejecuta:
 Casos cubiertos por tests:
 
 - referencia inicial sin notificacion masiva;
+- varias paginas configurables;
+- selector CSS y palabras clave opcionales;
 - enlace nuevo detectado;
 - enlace nuevo en otro bloque detectado en modo pagina completa;
 - enlace nuevo en otro bloque ignorado cuando el filtro opcional esta activado;

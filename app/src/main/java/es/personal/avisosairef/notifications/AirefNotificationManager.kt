@@ -28,7 +28,7 @@ class AirefNotificationManager(private val context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    fun notifyNewPublications(publications: List<Publicacion>) {
+    fun notifyNewPublications(monitorName: String, publications: List<Publicacion>) {
         if (publications.isEmpty()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -49,14 +49,14 @@ class AirefNotificationManager(private val context: Context) {
         val body = if (publications.size == 1) first.title else "${publications.size} enlaces nuevos detectados"
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Cambio detectado en una pagina")
+            .setContentTitle("Cambio en $monitorName")
             .setContentText(body)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
         if (publications.size > 1) builder.setStyle(style)
 
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID + monitorName.hashCode(), builder.build())
     }
 
     companion object {

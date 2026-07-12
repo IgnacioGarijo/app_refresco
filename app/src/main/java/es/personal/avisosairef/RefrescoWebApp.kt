@@ -15,7 +15,10 @@ class RefrescoWebApp : Application() {
         CoroutineScope(Dispatchers.Default).launch {
             val state = ServiceLocator.repository(this@RefrescoWebApp).state.first()
             if (state.monitoringEnabled) {
-                AirefWorkScheduler.schedulePeriodic(this@RefrescoWebApp, state.intervalMinutes)
+                AirefWorkScheduler.schedulePeriodic(
+                    this@RefrescoWebApp,
+                    ServiceLocator.repository(this@RefrescoWebApp).nextPeriodicIntervalMinutes(state)
+                )
             } else {
                 AirefWorkScheduler.cancelPeriodic(this@RefrescoWebApp)
             }

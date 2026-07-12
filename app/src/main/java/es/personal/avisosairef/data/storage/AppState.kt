@@ -1,14 +1,34 @@
 package es.personal.avisosairef.data.storage
 
+import es.personal.avisosairef.Constants
 import es.personal.avisosairef.data.parser.Publicacion
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class AppState(
-    val formatVersion: Int = 1,
-    val monitoredUrl: String = es.personal.avisosairef.Constants.DefaultPageUrl,
-    val intervalMinutes: Long = es.personal.avisosairef.Constants.DefaultIntervalMinutes,
+    val formatVersion: Int = 2,
+    val monitors: List<WebMonitor> = listOf(WebMonitor.default()),
+    val selectedMonitorId: String = monitors.firstOrNull()?.id ?: Constants.DefaultMonitorId,
+    val monitoringEnabled: Boolean = true,
+    val telegramEnabled: Boolean = false,
+    val telegramBotToken: String = "",
+    val telegramChatId: String = ""
+) {
+    val selectedMonitor: WebMonitor
+        get() = monitors.firstOrNull { it.id == selectedMonitorId } ?: monitors.firstOrNull() ?: WebMonitor.default()
+}
+
+@Serializable
+data class WebMonitor(
+    val id: String,
+    val name: String,
+    val folder: String = "Personal",
+    val monitoredUrl: String,
+    val intervalMinutes: Long = Constants.DefaultIntervalMinutes,
+    val enabled: Boolean = true,
     val sectionFilterEnabled: Boolean = false,
+    val cssSelector: String = "",
+    val includeKeywords: String = "",
     val knownPublications: List<Publicacion> = emptyList(),
     val unseenPublications: List<Publicacion> = emptyList(),
     val recentPublications: List<Publicacion> = emptyList(),
@@ -18,6 +38,14 @@ data class AppState(
     val lastSuccessAtMillis: Long? = null,
     val lastChangeAtMillis: Long? = null,
     val lastError: String? = null,
-    val monitoringEnabled: Boolean = true,
     val lastResult: String = "Referencia pendiente"
-)
+) {
+    companion object {
+        fun default(): WebMonitor = WebMonitor(
+            id = Constants.DefaultMonitorId,
+            name = "AIReF - Personal laboral fijo",
+            folder = "Convocatorias",
+            monitoredUrl = Constants.DefaultPageUrl
+        )
+    }
+}

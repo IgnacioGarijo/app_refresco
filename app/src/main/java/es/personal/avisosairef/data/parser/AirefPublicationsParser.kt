@@ -10,11 +10,19 @@ class AirefPublicationsParser {
         html: String,
         pageUrl: String = Constants.DefaultPageUrl,
         previousKnownCount: Int = 0,
-        targetTitle: String? = null
+        targetTitle: String? = null,
+        cssSelector: String = "",
+        includeKeywords: String = ""
     ): ParserResult {
         val baseUrl = baseOrigin(pageUrl)
         val document = Jsoup.parse(html, baseUrl)
-        val links = if (targetTitle.isNullOrBlank()) {
+        val links = if (cssSelector.isNotBlank()) {
+            val selected = document.select(cssSelector)
+            if (selected.isEmpty()) {
+                return ParserResult.Failure(ParserFailureReason.TargetSectionMissing, "No se encontro el selector CSS configurado.")
+            }
+            selected.flatMap { it.select("a[href]") }
+        } else if (targetTitle.isNullOrBlank()) {
             extractMainContent(document)
         } else {
             val targetComparable = TextNormalizer.comparable(targetTitle)
@@ -27,6 +35,7 @@ class AirefPublicationsParser {
 
         val publications = links
             .mapNotNull { linkToPublication(it, baseUrl) }
+            .filter { matchesKeywords(it, includeKeywords) }
             .distinctBy { it.key }
 
         if (publications.isEmpty() && previousKnownCount > 0) {
@@ -69,6 +78,15 @@ class AirefPublicationsParser {
             title.contains("cronograma") ||
             title.contains("plantilla") ||
             title.contains("modelo")
+    }
+
+    private fun matchesKeywords(publication: Publicacion, keywords: String): Boolean {
+        val terms = keywords.split(",", "\n", ";")
+            .map { TextNormalizer.comparable(it) }
+            .filter { it.isNotBlank() }
+        if (terms.isEmpty()) return true
+        val haystack = TextNormalizer.comparable("${publication.title} ${publication.url}")
+        return terms.any { haystack.contains(it) }
     }
 
     private fun extractPrimary(targetElement: Element, targetComparable: String): List<Element>? {

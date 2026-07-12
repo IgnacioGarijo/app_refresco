@@ -24,7 +24,7 @@ class AirefRepositoryTest {
         val outcome = repository.checkNow()
         assertTrue(outcome.firstReferenceCreated)
         assertTrue(outcome.newPublications.isEmpty())
-        assertEquals(2, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).selectedMonitor.knownPublications.size)
     }
 
     @Test
@@ -61,7 +61,7 @@ class AirefRepositoryTest {
         val repository = repositoryWith(fetcher)
         repository.checkNow()
         repository.checkNow()
-        assertEquals(2, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).selectedMonitor.knownPublications.size)
     }
 
     @Test
@@ -74,7 +74,30 @@ class AirefRepositoryTest {
         repository.checkNow()
         val outcome = repository.checkNow()
         assertEquals(CheckStatus.Error, outcome.status)
-        assertEquals(2, repositoryState(repository).knownPublications.size)
+        assertEquals(2, repositoryState(repository).selectedMonitor.knownPublications.size)
+    }
+
+    @Test
+    fun canAddSecondMonitorAndCheckIt() = runTest {
+        val repository = repositoryWith(FakeFetcher(FetchResult.Success("<html><body><main><a href='/x.pdf'>X</a></main></body></html>", null, null)))
+        val id = repository.upsertMonitor(
+            id = null,
+            name = "Otra pagina",
+            folder = "Pruebas",
+            url = "https://example.com",
+            intervalMinutes = 60,
+            enabled = true,
+            sectionFilterEnabled = false,
+            cssSelector = "",
+            includeKeywords = ""
+        )
+
+        val outcome = repository.checkNow(id)
+
+        assertTrue(outcome.firstReferenceCreated)
+        assertEquals(2, repositoryState(repository).monitors.size)
+        assertEquals("Otra pagina", repositoryState(repository).selectedMonitor.name)
+        assertEquals(1, repositoryState(repository).selectedMonitor.knownPublications.size)
     }
 
     private fun repositoryWith(fetcher: AirefFetcher): AirefRepository {
@@ -121,17 +144,25 @@ class AirefRepositoryTest {
             flow.value = transform(flow.value)
             return flow.value
         }
-        override suspend fun resetReference() {
+        override suspend fun resetReference(monitorId: String) {
             update {
                 it.copy(
-                    knownPublications = emptyList(),
-                    unseenPublications = emptyList(),
-                    recentPublications = emptyList(),
-                    eTag = null,
-                    lastModified = null,
-                    lastChangeAtMillis = null,
-                    lastError = null,
-                    lastResult = "Referencia pendiente"
+                    monitors = it.monitors.map { monitor ->
+                        if (monitor.id != monitorId) {
+                            monitor
+                        } else {
+                            monitor.copy(
+                                knownPublications = emptyList(),
+                                unseenPublications = emptyList(),
+                                recentPublications = emptyList(),
+                                eTag = null,
+                                lastModified = null,
+                                lastChangeAtMillis = null,
+                                lastError = null,
+                                lastResult = "Referencia pendiente"
+                            )
+                        }
+                    }
                 )
             }
         }
