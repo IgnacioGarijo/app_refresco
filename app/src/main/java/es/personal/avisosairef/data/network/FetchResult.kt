@@ -8,6 +8,7 @@ sealed interface FetchResult {
 
 sealed interface FetchError {
     data class Network(val message: String) : FetchError
+    data class Tls(val message: String) : FetchError
     data class Http(val code: Int) : FetchError
     data class TooLarge(val maxBytes: Long) : FetchError
 }

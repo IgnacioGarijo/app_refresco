@@ -105,12 +105,12 @@ class AirefRepositoryTest {
     """.trimIndent()
 
     private class FakeFetcher(private val result: FetchResult) : AirefFetcher {
-        override suspend fun fetch(eTag: String?, lastModified: String?) = result
+        override suspend fun fetch(url: String, eTag: String?, lastModified: String?) = result
     }
 
     private class QueueFetcher(vararg results: FetchResult) : AirefFetcher {
         private val queue = ArrayDeque(results.toList())
-        override suspend fun fetch(eTag: String?, lastModified: String?) = queue.removeFirst()
+        override suspend fun fetch(url: String, eTag: String?, lastModified: String?) = queue.removeFirst()
     }
 
     private class MemoryStore : StateStore {

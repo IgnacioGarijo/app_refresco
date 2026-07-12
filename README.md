@@ -21,6 +21,8 @@ La app esta pensada para uso personal. No usa cuentas, Firebase, analitica, publ
 - Incluye una pantalla Compose en espanol con estado, ultima comprobacion, numero de documentos conocidos, historial y acciones manuales.
 - Permite "Comprobar ahora" sin crear workers adicionales.
 - Permite "Restablecer referencia" con confirmacion.
+- Permite editar la URL monitorizada.
+- Permite elegir una frecuencia aproximada: 15, 30, 60 o 120 minutos.
 
 ## Estrategia de extraccion
 
@@ -57,6 +59,7 @@ Se usa WorkManager con un trabajo periodico unico:
 - nombre unico: `airef_publications_periodic_check`;
 - `enqueueUniquePeriodicWork`;
 - periodicidad aproximada: 30 minutos;
+- periodicidad configurable desde la app: 15, 30, 60 o 120 minutos;
 - red requerida: `NetworkType.CONNECTED`;
 - bateria: `requiresBatteryNotLow(true)`;
 - no exige Wi-Fi;
@@ -83,6 +86,16 @@ En cada comprobacion:
 - ante HTTP 304 registra una comprobacion correcta sin parsear;
 - limita el tamano maximo de respuesta;
 - conserva el estado anterior ante errores de red, HTTP invalido o parsing anomalos.
+
+## TLS en airef.es
+
+La web de AIReF usa un certificado emitido por FNMT. En algunos dispositivos Android la comprobacion puede fallar con:
+
+```text
+Trust anchor for certification path not found
+```
+
+La app mantiene validacion TLS estricta y no acepta certificados invalidos. Para `airef.es` se incluye la CA intermedia publica `AC Componentes Informaticos` de FNMT en `res/raw/fnmt_ac_componentes_informaticos.pem`, limitada mediante `network_security_config.xml` al dominio `airef.es` y sus subdominios. Para cualquier otra URL configurada por el usuario se usan las autoridades del sistema Android.
 
 ## Arquitectura
 
@@ -125,6 +138,7 @@ Verificacion realizada antes de generar el APK:
 - manifiesto revisado;
 - permisos revisados;
 - comprobado que solo hay un trabajo periodico unico;
+- comprobado que los cambios de URL/frecuencia reprograman ese trabajo unico;
 - comprobado con fixtures que otro apartado no genera novedades;
 - comprobado con fixtures que un enlace nuevo del apartado objetivo si genera novedad;
 - comprobado que la primera sincronizacion no notifica;
@@ -150,7 +164,7 @@ Tamano:
 SHA-256:
 
 ```text
-C11717D6D5455F3401A7B136A1BA61F4FC8036B6089D6F8CEFC48BBEF3FCFE92
+3234FD9298B34C0E9EDA76BBB53568EAE39BCDD9810EEEEB83E155ECDBD6644A
 ```
 
 Para recalcularlo:

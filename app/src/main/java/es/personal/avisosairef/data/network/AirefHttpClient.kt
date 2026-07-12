@@ -7,9 +7,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLHandshakeException
 
 interface AirefFetcher {
-    suspend fun fetch(eTag: String?, lastModified: String?): FetchResult
+    suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult
 }
 
 class AirefHttpClient(
@@ -21,9 +22,9 @@ class AirefHttpClient(
         .callTimeout(30, TimeUnit.SECONDS)
         .build()
 ) : AirefFetcher {
-    override suspend fun fetch(eTag: String?, lastModified: String?): FetchResult = withContext(Dispatchers.IO) {
+    override suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url(Constants.PageUrl)
+            .url(url)
             .header("User-Agent", "AvisosAIReF/1.0 (Android personal monitor; +https://www.airef.es)")
             .header("Accept", "text/html,application/xhtml+xml")
             .header("Accept-Encoding", "gzip")
@@ -46,6 +47,8 @@ class AirefHttpClient(
                 if (bytes.size > MAX_BYTES) return@withContext FetchResult.Failure(FetchError.TooLarge(MAX_BYTES))
                 FetchResult.Success(bytes.toString(Charsets.UTF_8), newETag, newLastModified)
             }
+        } catch (ex: SSLHandshakeException) {
+            FetchResult.Failure(FetchError.Tls(ex.cause?.message ?: ex.message ?: "Error de certificado TLS"))
         } catch (ex: IOException) {
             FetchResult.Failure(FetchError.Network(ex.message ?: "Error de red"))
         }

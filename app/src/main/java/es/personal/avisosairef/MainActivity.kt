@@ -26,6 +26,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -47,7 +48,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import es.personal.avisosairef.data.repository.CheckStatus
 import es.personal.avisosairef.data.storage.AppState
 import es.personal.avisosairef.ui.theme.AvisosAirefTheme
 import es.personal.avisosairef.worker.AirefWorkScheduler
@@ -77,11 +77,31 @@ class MainViewModel(
     val state: StateFlow<AppState> = repository.state.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppState())
     var checking by mutableStateOf(false)
         private set
+    var settingsError by mutableStateOf<String?>(null)
+        private set
 
     fun setMonitoring(context: android.content.Context, enabled: Boolean) {
         viewModelScope.launch {
             repository.setMonitoringEnabled(enabled)
-            if (enabled) AirefWorkScheduler.schedulePeriodic(context) else AirefWorkScheduler.cancelPeriodic(context)
+            if (enabled) {
+                AirefWorkScheduler.schedulePeriodic(context, state.value.intervalMinutes)
+            } else {
+                AirefWorkScheduler.cancelPeriodic(context)
+            }
+        }
+    }
+
+    fun updateSettings(context: android.content.Context, url: String, intervalMinutes: Long) {
+        viewModelScope.launch {
+            settingsError = null
+            runCatching {
+                repository.updateSettings(url, intervalMinutes)
+                if (state.value.monitoringEnabled) {
+                    AirefWorkScheduler.schedulePeriodic(context, intervalMinutes)
+                }
+            }.onFailure {
+                settingsError = it.message ?: "No se pudieron guardar los ajustes."
+            }
         }
     }
 
@@ -100,6 +120,7 @@ class MainViewModel(
     companion object {
         fun factory(repository: es.personal.avisosairef.data.repository.AirefRepository): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(repository) as T
             }
     }
@@ -110,7 +131,17 @@ private fun AirefScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var showResetDialog by remember { mutableStateOf(false) }
+    var urlDraft by remember { mutableStateOf(state.monitoredUrl) }
+    var intervalDraft by remember { mutableStateOf(state.intervalMinutes) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    LaunchedEffect(state.monitoredUrl) {
+        urlDraft = state.monitoredUrl
+    }
+
+    LaunchedEffect(state.intervalMinutes) {
+        intervalDraft = state.intervalMinutes
+    }
 
     LaunchedEffect(state.monitoringEnabled) {
         if (state.monitoringEnabled &&
@@ -131,19 +162,44 @@ private fun AirefScreen(viewModel: MainViewModel) {
         ) {
             item {
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(Constants.PageUrl, style = MaterialTheme.typography.bodySmall)
+                Text(state.monitoredUrl, style = MaterialTheme.typography.bodySmall)
             }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("URL monitorizada", fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(
+                            value = urlDraft,
+                            onValueChange = { urlDraft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                            maxLines = 4,
+                            supportingText = { Text("Debe ser HTTPS. Si cambias la URL se creara una nueva referencia inicial.") }
+                        )
                         Text("Apartado vigilado", fontWeight = FontWeight.SemiBold)
                         Text(stringResource(R.string.target_section))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.monitoring_active))
                             Switch(checked = state.monitoringEnabled, onCheckedChange = { viewModel.setMonitoring(context, it) })
                         }
-                        Text("Frecuencia: aproximadamente cada 30 minutos")
-                        Text("Android puede retrasar las comprobaciones para ahorrar batería.")
+                        Text("Frecuencia aproximada", fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            intervalOptions.forEach { option ->
+                                if (intervalDraft == option) {
+                                    Button(onClick = { intervalDraft = option }) { Text(option.intervalLabel()) }
+                                } else {
+                                    OutlinedButton(onClick = { intervalDraft = option }) { Text(option.intervalLabel()) }
+                                }
+                            }
+                        }
+                        Button(
+                            onClick = { viewModel.updateSettings(context, urlDraft, intervalDraft) },
+                            enabled = urlDraft.trim() != state.monitoredUrl || intervalDraft != state.intervalMinutes
+                        ) {
+                            Text("Guardar ajustes")
+                        }
+                        viewModel.settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        Text("Android puede retrasar las comprobaciones para ahorrar bateria.")
                     }
                 }
             }
@@ -151,12 +207,12 @@ private fun AirefScreen(viewModel: MainViewModel) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Estado actual: ${statusText(state)}", fontWeight = FontWeight.SemiBold)
-                        Text("Última comprobación intentada: ${state.lastAttemptAtMillis.formatDate()}")
-                        Text("Última comprobación correcta: ${state.lastSuccessAtMillis.formatDate()}")
+                        Text("Ultima comprobacion intentada: ${state.lastAttemptAtMillis.formatDate()}")
+                        Text("Ultima comprobacion correcta: ${state.lastSuccessAtMillis.formatDate()}")
                         Text("Resultado: ${state.lastResult}")
-                        Text("Último cambio detectado: ${state.lastChangeAtMillis.formatDate()}")
+                        Text("Ultimo cambio detectado: ${state.lastChangeAtMillis.formatDate()}")
                         Text("Documentos conocidos: ${state.knownPublications.size}")
-                        state.lastError?.let { Text("Último error: $it", color = MaterialTheme.colorScheme.error) }
+                        state.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
                     }
                 }
             }
@@ -166,7 +222,7 @@ private fun AirefScreen(viewModel: MainViewModel) {
                         Text(stringResource(R.string.check_now))
                     }
                     OutlinedButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Constants.PageUrl)))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.monitoredUrl)))
                     }) {
                         Text(stringResource(R.string.open_airef))
                     }
@@ -180,10 +236,10 @@ private fun AirefScreen(viewModel: MainViewModel) {
                 }
             }
             item {
-                Text("Últimos documentos detectados", style = MaterialTheme.typography.titleMedium)
+                Text("Ultimos documentos detectados", style = MaterialTheme.typography.titleMedium)
             }
             if (state.recentPublications.isEmpty()) {
-                item { Text("Aún no hay novedades posteriores a la referencia inicial.") }
+                item { Text("Aun no hay novedades posteriores a la referencia inicial.") }
             } else {
                 items(state.recentPublications) { publication ->
                     Card(Modifier.fillMaxWidth()) {
@@ -229,3 +285,13 @@ private fun statusText(state: AppState): String = when {
 
 private fun Long?.formatDate(): String =
     this?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) } ?: "Nunca"
+
+private val intervalOptions = listOf(15L, 30L, 60L, 120L)
+
+private fun Long.intervalLabel(): String = when (this) {
+    15L -> "15 min"
+    30L -> "30 min"
+    60L -> "1 h"
+    120L -> "2 h"
+    else -> "$this min"
+}

@@ -23,6 +23,30 @@ class AirefRepository(
         store.update { it.copy(monitoringEnabled = enabled) }
     }
 
+    suspend fun updateSettings(monitoredUrl: String, intervalMinutes: Long) {
+        val cleanUrl = monitoredUrl.trim()
+        require(cleanUrl.startsWith("https://")) { "La URL debe empezar por https://" }
+        store.update {
+            if (it.monitoredUrl == cleanUrl) {
+                it.copy(intervalMinutes = intervalMinutes)
+            } else {
+                it.copy(
+                    monitoredUrl = cleanUrl,
+                    intervalMinutes = intervalMinutes,
+                    knownPublications = emptyList(),
+                    unseenPublications = emptyList(),
+                    recentPublications = emptyList(),
+                    eTag = null,
+                    lastModified = null,
+                    lastSuccessAtMillis = null,
+                    lastChangeAtMillis = null,
+                    lastError = null,
+                    lastResult = "Referencia pendiente: URL actualizada."
+                )
+            }
+        }
+    }
+
     suspend fun resetReference() {
         store.resetReference()
     }
@@ -36,7 +60,7 @@ class AirefRepository(
         val now = clock()
         store.update { it.copy(lastAttemptAtMillis = now) }
 
-        return when (val fetch = httpClient.fetch(before.eTag, before.lastModified)) {
+        return when (val fetch = httpClient.fetch(before.monitoredUrl, before.eTag, before.lastModified)) {
             is FetchResult.NotModified -> {
                 store.update {
                     it.copy(
@@ -61,7 +85,7 @@ class AirefRepository(
     }
 
     private suspend fun handleHtml(before: AppState, fetch: FetchResult.Success, now: Long): CheckOutcome {
-        return when (val parsed = parser.parse(fetch.html, before.knownPublications.size)) {
+        return when (val parsed = parser.parse(fetch.html, before.monitoredUrl, before.knownPublications.size)) {
             is ParserResult.Failure -> {
                 val message = "Error de parsing: ${parsed.message}"
                 store.update {
@@ -118,6 +142,7 @@ class AirefRepository(
 
     private fun FetchError.toUserMessage(): String = when (this) {
         is FetchError.Network -> "Error de red: $message"
+        is FetchError.Tls -> "Error TLS/certificado: $message"
         is FetchError.Http -> "Respuesta HTTP no válida: $code"
         is FetchError.TooLarge -> "Respuesta demasiado grande; límite ${maxBytes / 1024} KB"
     }

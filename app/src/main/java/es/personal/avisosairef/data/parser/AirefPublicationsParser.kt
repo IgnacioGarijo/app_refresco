@@ -6,12 +6,12 @@ import org.jsoup.nodes.Element
 import java.util.Locale
 
 class AirefPublicationsParser(
-    private val targetTitle: String = Constants.TargetSection,
-    private val baseUrl: String = Constants.BaseUrl
+    private val targetTitle: String = Constants.TargetSection
 ) {
     private val targetComparable = TextNormalizer.comparable(targetTitle)
 
-    fun parse(html: String, previousKnownCount: Int = 0): ParserResult {
+    fun parse(html: String, pageUrl: String = Constants.DefaultPageUrl, previousKnownCount: Int = 0): ParserResult {
+        val baseUrl = baseOrigin(pageUrl)
         val document = Jsoup.parse(html, baseUrl)
         val targetElement = findTargetElement(document) ?: return ParserResult.Failure(
             ParserFailureReason.TargetSectionMissing,
@@ -20,7 +20,7 @@ class AirefPublicationsParser(
 
         val links = extractPrimary(targetElement) ?: extractFallback(targetElement)
         val publications = links
-            .mapNotNull { linkToPublication(it) }
+            .mapNotNull { linkToPublication(it, baseUrl) }
             .distinctBy { it.key }
 
         if (publications.isEmpty() && previousKnownCount > 0) {
@@ -66,7 +66,7 @@ class AirefPublicationsParser(
         return container?.select("a[href]") ?: emptyList()
     }
 
-    private fun linkToPublication(link: Element): Publicacion? {
+    private fun linkToPublication(link: Element, baseUrl: String): Publicacion? {
         val title = TextNormalizer.visible(link.text().ifBlank { link.attr("title") })
         if (title.isBlank()) return null
         val url = UrlNormalizer.normalize(link.attr("href"), baseUrl) ?: return null
@@ -125,4 +125,10 @@ class AirefPublicationsParser(
         Regex("\\b\\d{1,2}\\s+de\\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+\\s+de\\s+\\d{4}\\b").find(normalized)?.let { return it.value }
         return null
     }
+
+    private fun baseOrigin(pageUrl: String): String =
+        runCatching {
+            val uri = java.net.URI(pageUrl)
+            "${uri.scheme}://${uri.host}"
+        }.getOrDefault(Constants.DefaultPageUrl)
 }

@@ -12,13 +12,14 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 object AirefWorkScheduler {
-    fun schedulePeriodic(context: Context) {
+    fun schedulePeriodic(context: Context, intervalMinutes: Long = es.personal.avisosairef.Constants.DefaultIntervalMinutes) {
+        val safeInterval = intervalMinutes.coerceAtLeast(15)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
             .build()
 
-        val request = PeriodicWorkRequestBuilder<AirefCheckWorker>(30, TimeUnit.MINUTES)
+        val request = PeriodicWorkRequestBuilder<AirefCheckWorker>(safeInterval, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofMinutes(10))
             .build()
