@@ -94,6 +94,20 @@ class AirefRepository(
         }
     }
 
+    suspend fun deleteGroup(name: String) {
+        val cleanName = name.trim()
+        store.update { state ->
+            val remainingMonitors = state.monitors.filterNot { it.folder == cleanName }
+            state.copy(
+                monitors = remainingMonitors,
+                groups = state.groups.filterNot { it.name == cleanName },
+                selectedMonitorId = remainingMonitors.firstOrNull { it.id == state.selectedMonitorId }?.id
+                    ?: remainingMonitors.firstOrNull()?.id
+                    ?: Constants.DefaultMonitorId
+            )
+        }
+    }
+
     suspend fun upsertMonitor(
         id: String?,
         name: String,
@@ -147,6 +161,7 @@ class AirefRepository(
             }
             state.copy(
                 monitors = (state.monitors.filterNot { it.id == cleanId } + updated).sortedWith(compareBy<WebMonitor> { it.folder.lowercase() }.thenBy { it.name.lowercase() }),
+                groups = ensureGroupExists(state.groups, updated.folder),
                 selectedMonitorId = cleanId
             )
         }
@@ -155,10 +170,19 @@ class AirefRepository(
 
     suspend fun deleteMonitor(monitorId: String) {
         store.update { state ->
-            val remaining = state.monitors.filterNot { it.id == monitorId }.ifEmpty { listOf(WebMonitor.default()) }
+            val removedFolder = state.monitors.firstOrNull { it.id == monitorId }?.folder
+            val remaining = state.monitors.filterNot { it.id == monitorId }
+            val remainingGroups = if (removedFolder != null && remaining.none { it.folder == removedFolder }) {
+                state.groups.filterNot { it.name == removedFolder }
+            } else {
+                state.groups
+            }
             state.copy(
                 monitors = remaining,
-                selectedMonitorId = remaining.firstOrNull { it.id == state.selectedMonitorId }?.id ?: remaining.first().id
+                groups = remainingGroups,
+                selectedMonitorId = remaining.firstOrNull { it.id == state.selectedMonitorId }?.id
+                    ?: remaining.firstOrNull()?.id
+                    ?: Constants.DefaultMonitorId
             )
         }
     }
@@ -350,6 +374,13 @@ class AirefRepository(
             state.copy(monitors = state.monitors.map { if (it.id == monitorId) transform(it) else it })
         }
     }
+
+    private fun ensureGroupExists(groups: List<MonitorGroup>, name: String): List<MonitorGroup> =
+        if (groups.any { it.name == name }) {
+            groups
+        } else {
+            (groups + MonitorGroup(name, "#063347")).sortedBy { it.name.lowercase() }
+        }
 
     private fun FetchError.toUserMessage(): String = when (this) {
         is FetchError.Network -> "Error de red: $message"

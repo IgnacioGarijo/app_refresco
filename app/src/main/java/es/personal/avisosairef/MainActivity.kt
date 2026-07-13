@@ -9,19 +9,24 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
@@ -35,6 +40,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -126,6 +132,15 @@ class MainViewModel(
 
     fun toggleGroup(name: String) {
         viewModelScope.launch { repository.toggleGroupCollapsed(name) }
+    }
+
+    fun deleteGroup(context: android.content.Context, name: String) {
+        viewModelScope.launch {
+            repository.deleteGroup(name)
+            if (state.value.monitoringEnabled) {
+                AirefWorkScheduler.schedulePeriodic(context, repository.nextPeriodicIntervalMinutes(state.value))
+            }
+        }
     }
 
     fun saveMonitor(context: android.content.Context, draft: MonitorDraft) {
@@ -239,6 +254,7 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
     var editMonitor by remember { mutableStateOf<MonitorDraft?>(null) }
     var editGroup by remember { mutableStateOf<GroupDraft?>(null) }
     var deleteTarget by remember { mutableStateOf<WebMonitor?>(null) }
+    var deleteGroupTarget by remember { mutableStateOf<MonitorGroup?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
@@ -280,6 +296,15 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
                     }
                 }
             }
+            if (state.groups.isEmpty()) {
+                item {
+                    Text(
+                        "No hay paginas configuradas. Anade un grupo o una pagina para empezar.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             state.groups.forEach { group ->
                 val monitors = state.monitors.filter { it.folder == group.name }
                 item {
@@ -290,6 +315,7 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
                         checkingId = viewModel.checkingId,
                         onToggle = { viewModel.toggleGroup(group.name) },
                         onEditGroup = { editGroup = GroupDraft.from(group) },
+                        onDeleteGroup = { deleteGroupTarget = group },
                         onEdit = { editMonitor = MonitorDraft.from(it) },
                         onRefresh = { viewModel.checkNow(it.id) },
                         onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, it.monitoredUrl.toUri())) },
@@ -350,6 +376,22 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.cancel)) } }
         )
     }
+
+    deleteGroupTarget?.let { group ->
+        val monitorCount = state.monitors.count { it.folder == group.name }
+        AlertDialog(
+            onDismissRequest = { deleteGroupTarget = null },
+            title = { Text("Eliminar grupo") },
+            text = { Text("Se eliminara '${group.name}' junto con $monitorCount paginas y su historial local.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteGroup(context, group.name)
+                    deleteGroupTarget = null
+                }) { Text("Eliminar") }
+            },
+            dismissButton = { TextButton(onClick = { deleteGroupTarget = null }) { Text(stringResource(R.string.cancel)) } }
+        )
+    }
 }
 
 @Composable
@@ -360,6 +402,7 @@ private fun GroupCard(
     checkingId: String?,
     onToggle: () -> Unit,
     onEditGroup: () -> Unit,
+    onDeleteGroup: () -> Unit,
     onEdit: (WebMonitor) -> Unit,
     onRefresh: (WebMonitor) -> Unit,
     onOpen: (WebMonitor) -> Unit,
@@ -389,6 +432,9 @@ private fun GroupCard(
                 IconButton(onClick = onEditGroup) {
                     Icon(Icons.Default.Edit, contentDescription = "Editar grupo")
                 }
+                IconButton(onClick = onDeleteGroup) {
+                    Icon(Icons.Default.Delete, contentDescription = "Eliminar grupo")
+                }
                 IconButton(onClick = onToggle) {
                     Icon(if (group.collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess, contentDescription = "Plegar grupo")
                 }
@@ -398,6 +444,7 @@ private fun GroupCard(
                     monitors.forEach { monitor ->
                         PageCard(
                             monitor = monitor,
+                            groupColor = color,
                             globalEnabled = globalEnabled,
                             isChecking = checkingId == monitor.id,
                             onEdit = { onEdit(monitor) },
@@ -416,6 +463,7 @@ private fun GroupCard(
 @Composable
 private fun PageCard(
     monitor: WebMonitor,
+    groupColor: Color,
     globalEnabled: Boolean,
     isChecking: Boolean,
     onEdit: () -> Unit,
@@ -425,10 +473,30 @@ private fun PageCard(
     onEnabledChange: (Boolean) -> Unit
 ) {
     var showDetails by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, groupColor.copy(alpha = 0.35f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(groupColor)
+            )
+            Column(Modifier.padding(12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                Text(monitor.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        monitor.name.uppercase(),
+                        fontWeight = FontWeight.Bold,
+                        color = groupColor,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(monitor.monitoredUrl, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                }
                 Switch(checked = monitor.enabled, enabled = globalEnabled, onCheckedChange = onEnabledChange)
             }
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -440,16 +508,18 @@ private fun PageCard(
             }
             if (showDetails) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(monitor.monitoredUrl, style = MaterialTheme.typography.bodySmall)
                     Text("Estado: ${statusText(globalEnabled, monitor)}")
                     Text("Ultima comprobacion intentada: ${monitor.lastAttemptAtMillis.formatDate()}")
                     Text("Ultima comprobacion correcta: ${monitor.lastSuccessAtMillis.formatDate()}")
                     Text("Ultimo cambio: ${monitor.lastChangeAtMillis.formatDate()}")
                     Text("Resultado: ${monitor.lastResult}")
                     Text("Enlaces conocidos: ${monitor.knownPublications.size}")
-                    Text("Diagnostico: ${monitor.lastDiagnostics}")
-                    monitor.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
+                    monitor.lastError?.let {
+                        Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error)
+                        Text("Diagnostico tecnico: ${monitor.lastDiagnostics}", color = MaterialTheme.colorScheme.error)
+                    }
                 }
+            }
             }
         }
     }

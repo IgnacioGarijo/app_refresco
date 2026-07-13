@@ -136,6 +136,56 @@ class AirefRepositoryTest {
         assertTrue(repositoryState(repository).selectedMonitor.lastDiagnostics.contains("texto visible"))
     }
 
+    @Test
+    fun deletingLastPageRemovesItsGroup() = runTest {
+        val repository = repositoryWith(FakeFetcher(FetchResult.Success(html("A", "/a.pdf"), null, null)))
+        val id = repository.upsertMonitor(
+            id = null,
+            name = "Temporal",
+            folder = "Temporal",
+            url = "https://example.com/temporal",
+            intervalMinutes = 30,
+            enabled = true,
+            cssSelector = "",
+            includeKeywords = ""
+        )
+
+        repository.deleteMonitor(id)
+
+        assertTrue(repositoryState(repository).groups.none { it.name == "Temporal" })
+    }
+
+    @Test
+    fun deletingGroupRemovesAllItsPages() = runTest {
+        val repository = repositoryWith(FakeFetcher(FetchResult.Success(html("A", "/a.pdf"), null, null)))
+        repository.upsertMonitor(
+            id = null,
+            name = "Uno",
+            folder = "Bloque",
+            url = "https://example.com/uno",
+            intervalMinutes = 30,
+            enabled = true,
+            cssSelector = "",
+            includeKeywords = ""
+        )
+        repository.upsertMonitor(
+            id = null,
+            name = "Dos",
+            folder = "Bloque",
+            url = "https://example.com/dos",
+            intervalMinutes = 30,
+            enabled = true,
+            cssSelector = "",
+            includeKeywords = ""
+        )
+
+        repository.deleteGroup("Bloque")
+
+        val state = repositoryState(repository)
+        assertTrue(state.groups.none { it.name == "Bloque" })
+        assertTrue(state.monitors.none { it.folder == "Bloque" })
+    }
+
     private fun repositoryWith(fetcher: AirefFetcher): AirefRepository {
         return AirefRepository(MemoryStore(), fetcher, clock = { 1_000L })
     }

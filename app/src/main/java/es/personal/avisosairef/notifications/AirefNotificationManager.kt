@@ -11,6 +11,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.toColorInt
 import androidx.core.net.toUri
 import es.personal.avisosairef.R
 import es.personal.avisosairef.data.parser.Publicacion
@@ -20,7 +21,7 @@ class AirefNotificationManager(private val context: Context) {
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = context.getString(R.string.notification_channel_description)
         }
@@ -42,17 +43,19 @@ class AirefNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val style = NotificationCompat.InboxStyle()
-        publications.take(6).forEach { style.addLine(it.title) }
-        if (publications.size > 1) style.setSummaryText("${publications.size} enlaces nuevos")
+        publications.take(6).forEach { style.addLine(it.title.uppercase()) }
+        if (publications.size > 1) style.setSummaryText("${publications.size} CAMBIOS NUEVOS")
 
-        val body = if (publications.size == 1) first.title else "${publications.size} enlaces nuevos detectados"
+        val body = if (publications.size == 1) first.title.uppercase() else "${publications.size} CAMBIOS NUEVOS DETECTADOS"
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Cambio en $monitorName")
+            .setContentTitle("CAMBIO EN ${monitorName.uppercase()}")
             .setContentText(body)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
+            .setColor("#063347".toColorInt())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
         if (publications.size > 1) builder.setStyle(style)
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID + monitorName.hashCode(), builder.build())

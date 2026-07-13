@@ -7,15 +7,18 @@ Aplicacion Android nativa, ligera y local para revisar paginas web periodicament
 - Permite configurar varias paginas.
 - Agrupa paginas por grupo, con color propio elegido por el usuario.
 - Cada pagina tiene nombre, URL, frecuencia, selector CSS opcional y palabras clave opcionales.
-- Las tarjetas de pagina muestran solo lo esencial: nombre, iconos de editar, refrescar, abrir, detalles, eliminar e interruptor individual.
+- Las paginas se muestran como subtarjetas dentro de cada grupo, con el nombre destacado y una barra lateral del color del grupo.
+- Las tarjetas de pagina muestran solo lo esencial: nombre, URL abreviada, iconos de editar, refrescar, abrir, detalles, eliminar e interruptor individual.
 - Cada grupo puede plegarse o desplegarse para ocultar sus paginas.
+- Cada grupo puede eliminarse completo con confirmacion; si borras la ultima pagina de un grupo, el grupo desaparece automaticamente.
 - El interruptor maestro esta en la cabecera: al apagarlo desactiva las paginas y al encenderlo restaura las que estaban activas.
 - Descarga solo el HTML de la pagina configurada.
 - Extrae los enlaces del contenido principal o de la zona configurada, incluidos HTML, scripts publicados, PDFs y recursos relativos.
 - Guarda una huella normalizada de la pagina: texto visible, estructura DOM, enlaces, metadatos sociales y URLs de imagen/avatar.
 - Guarda una referencia inicial por pagina en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
 - En comprobaciones posteriores avisa si aparecen enlaces nuevos o si cambia la huella de texto, DOM, metadatos o imagenes.
-- Muestra diagnostico tecnico por pagina: URL final consultada, bytes leidos, ETag, Last-Modified, contadores y hashes parciales de lo comparado.
+- Muestra diagnostico tecnico detallado solo cuando hay error, para no ensuciar la vista normal.
+- Las notificaciones usan prioridad alta, color tematico y titulo en mayusculas para destacar mejor.
 - Conserva todo localmente con DataStore: paginas, frecuencias, enlaces conocidos, ultimas novedades, ETag, Last-Modified, ultimos estados, errores y ajustes de Telegram.
 - Usa WorkManager con un trabajo periodico unico.
 - No usa Firebase, analitica, publicidad, cuentas ni APIs de pago. Telegram es opcional y solo se contacta con `api.telegram.org` si lo activas.
@@ -164,7 +167,7 @@ dist/RefrescoWeb.apk
 SHA-256:
 
 ```text
-DC97750ADCDC999A9DB167E7E4A5D1409A8326B57046834430E4529E0C4331E1
+BA29CA3FD1DA00AD3A7ACE9DFA671A85EEB3DBB3570DC755F517A91B33A129C6
 ```
 
 Calcular hash local:
