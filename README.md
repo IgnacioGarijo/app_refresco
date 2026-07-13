@@ -1,6 +1,6 @@
 # Refresco Web
 
-Aplicacion Android nativa, ligera y local para revisar paginas web periodicamente y avisar cuando aparecen enlaces o documentos nuevos.
+Aplicacion Android nativa, ligera y local para revisar paginas web periodicamente y avisar cuando aparecen enlaces, cambios de texto, cambios de estructura, metadatos relevantes o imagenes declaradas.
 
 ## Que hace
 
@@ -11,9 +11,11 @@ Aplicacion Android nativa, ligera y local para revisar paginas web periodicament
 - Cada grupo puede plegarse o desplegarse para ocultar sus paginas.
 - El interruptor maestro esta en la cabecera: al apagarlo desactiva las paginas y al encenderlo restaura las que estaban activas.
 - Descarga solo el HTML de la pagina configurada.
-- Extrae enlaces razonablemente relevantes del contenido principal: PDF, WordPress uploads, BOE y enlaces cuyo texto parezca una resolucion, listado, nota, calendario, cronograma, plantilla o modelo.
+- Extrae los enlaces del contenido principal o de la zona configurada, incluidos HTML, scripts publicados, PDFs y recursos relativos.
+- Guarda una huella normalizada de la pagina: texto visible, estructura DOM, enlaces, metadatos sociales y URLs de imagen/avatar.
 - Guarda una referencia inicial por pagina en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
-- En comprobaciones posteriores avisa si aparecen enlaces nuevos.
+- En comprobaciones posteriores avisa si aparecen enlaces nuevos o si cambia la huella de texto, DOM, metadatos o imagenes.
+- Muestra diagnostico tecnico por pagina: URL final consultada, bytes leidos, ETag, Last-Modified, contadores y hashes parciales de lo comparado.
 - Conserva todo localmente con DataStore: paginas, frecuencias, enlaces conocidos, ultimas novedades, ETag, Last-Modified, ultimos estados, errores y ajustes de Telegram.
 - Usa WorkManager con un trabajo periodico unico.
 - No usa Firebase, analitica, publicidad, cuentas ni APIs de pago. Telegram es opcional y solo se contacta con `api.telegram.org` si lo activas.
@@ -55,15 +57,43 @@ La identidad visual usa:
 
 El modo oscuro usa variantes mas claras para mantener contraste.
 
-## Estrategia de extraccion
+## Estrategia de deteccion
 
 1. Jsoup analiza el HTML inicial.
 2. Si hay selector CSS, se extraen enlaces dentro de los elementos que coincidan.
 3. Si no hay selector, el parser toma como zona principal `main article`, `article`, `main`, `body` o el documento completo, en ese orden.
-4. Dentro de esa zona recopila enlaces `<a href>`.
-5. Filtra enlaces que parezcan publicaciones/documentos para evitar menus, cookies, estilos, scripts o navegacion.
-6. Aplica palabras clave si se han configurado.
-7. Normaliza titulo y URL, elimina tracking, convierte relativas en absolutas y deduplica por URL normalizada.
+4. Dentro de esa zona recopila enlaces `<a href>` y los normaliza.
+5. Aplica palabras clave si se han configurado.
+6. Normaliza titulo y URL, elimina tracking, convierte relativas en absolutas y deduplica por URL normalizada.
+7. Construye un `PageSnapshot` con hashes separados de:
+   - texto visible sin scripts/estilos;
+   - estructura DOM simplificada;
+   - enlaces normalizados;
+   - metadatos relevantes (`description`, OpenGraph, Twitter cards, titulo, iconos);
+   - imagenes declaradas en `img`, `srcset` y metadatos sociales.
+8. Si no hay enlaces nuevos pero cambia algun hash relevante, se registra una novedad sintetica de tipo `Cambio`.
+
+Esta estrategia evita depender de clases CSS fragiles y detecta cambios pequenos que antes se escapaban, como una tarjeta nueva en GitHub Pages o una biografia/avatar expuestos como metadatos en X.
+
+## Diagnostico del fallo corregido
+
+Se reprodujo el caso de `https://ignaciogarijo.github.io/apuntes/` con una peticion publica:
+
+- HTTP 200.
+- `Cache-Control: max-age=600`.
+- `ETag: "6a549d28-4715"`.
+- `Last-Modified: Mon, 13 Jul 2026 08:09:12 GMT`.
+- El HTML ya contenia `codigo/paletas_colores.R` y `Paletas de colores en R`.
+
+Causa raiz mas probable: la version anterior filtraba enlaces buscando principalmente documentos/publicaciones. Un enlace normal a un archivo `.R` dentro de una tarjeta HTML podia quedar fuera o no generar un cambio si no se consideraba documento vigilado.
+
+Tambien se comprobo `https://x.com/ignacio_garijo`:
+
+- HTTP 200.
+- `Cache-Control: no-cache, no-store, max-age=0`.
+- El HTML inicial contiene metadatos `og:description`, `twitter:description` y referencias a imagen/avatar.
+
+La app ahora vigila esos metadatos e imagenes declaradas. Aun asi, X es una pagina dinamica: contenido de timeline, algunos estados de sesion o datos renderizados exclusivamente por JavaScript pueden no aparecer en el HTML inicial. Esta version no ejecuta JavaScript ni toma capturas visuales en segundo plano para mantener bajo consumo y evitar WebView oculto.
 
 ## Trabajo en segundo plano
 
@@ -134,7 +164,7 @@ dist/RefrescoWeb.apk
 SHA-256:
 
 ```text
-1AA181BF1274426B7C6AE85B2203D05D9B0EFBA81E4779AC230D712115D4B8B6
+DC97750ADCDC999A9DB167E7E4A5D1409A8326B57046834430E4529E0C4331E1
 ```
 
 Calcular hash local:

@@ -1,5 +1,6 @@
 package es.personal.avisosairef.data.network
 
+import android.annotation.SuppressLint
 import android.content.Context
 import es.personal.avisosairef.R
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +54,13 @@ class AirefHttpClient private constructor(
                 if (contentLength > MAX_BYTES) return@withContext FetchResult.Failure(FetchError.TooLarge(MAX_BYTES))
                 val bytes = body.bytes()
                 if (bytes.size > MAX_BYTES) return@withContext FetchResult.Failure(FetchError.TooLarge(MAX_BYTES))
-                FetchResult.Success(bytes.toString(Charsets.UTF_8), newETag, newLastModified)
+                FetchResult.Success(
+                    html = bytes.toString(Charsets.UTF_8),
+                    eTag = newETag,
+                    lastModified = newLastModified,
+                    finalUrl = response.request.url.toString(),
+                    bytesRead = bytes.size
+                )
             }
         } catch (ex: SSLHandshakeException) {
             FetchResult.Failure(FetchError.Tls(ex.cause?.message ?: ex.message ?: "Error de certificado TLS"))
@@ -117,6 +124,7 @@ class AirefHttpClient private constructor(
     }
 }
 
+@SuppressLint("CustomX509TrustManager")
 private class CompositeTrustManager(
     private val delegates: List<X509TrustManager>
 ) : X509TrustManager {

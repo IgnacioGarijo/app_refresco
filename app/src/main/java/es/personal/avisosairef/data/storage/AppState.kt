@@ -1,6 +1,7 @@
 package es.personal.avisosairef.data.storage
 
 import es.personal.avisosairef.Constants
+import es.personal.avisosairef.data.parser.PageSnapshot
 import es.personal.avisosairef.data.parser.Publicacion
 import kotlinx.serialization.Serializable
 
@@ -51,7 +52,9 @@ data class WebMonitor(
     val lastSuccessAtMillis: Long? = null,
     val lastChangeAtMillis: Long? = null,
     val lastError: String? = null,
-    val lastResult: String = "Referencia pendiente"
+    val lastResult: String = "Referencia pendiente",
+    val lastSnapshot: PageSnapshot? = null,
+    val lastDiagnostics: String = "Sin diagnostico todavia."
 ) {
     companion object {
         fun default(): WebMonitor = WebMonitor(

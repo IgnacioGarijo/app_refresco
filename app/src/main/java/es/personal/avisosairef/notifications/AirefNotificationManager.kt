@@ -7,17 +7,16 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import es.personal.avisosairef.R
 import es.personal.avisosairef.data.parser.Publicacion
 
 class AirefNotificationManager(private val context: Context) {
     fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.notification_channel_name),
@@ -35,7 +34,7 @@ class AirefNotificationManager(private val context: Context) {
         ) return
 
         val first = publications.first()
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(first.url))
+        val intent = Intent(Intent.ACTION_VIEW, first.url.toUri())
         val pendingIntent = PendingIntent.getActivity(
             context,
             0,

@@ -3,7 +3,6 @@ package es.personal.avisosairef
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -51,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,6 +63,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.toColorInt
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -290,7 +292,7 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
                         onEditGroup = { editGroup = GroupDraft.from(group) },
                         onEdit = { editMonitor = MonitorDraft.from(it) },
                         onRefresh = { viewModel.checkNow(it.id) },
-                        onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.monitoredUrl))) },
+                        onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, it.monitoredUrl.toUri())) },
                         onDelete = { deleteTarget = it },
                         onEnabledChange = { monitor, enabled -> viewModel.setMonitorEnabled(context, monitor.id, enabled) }
                     )
@@ -445,6 +447,7 @@ private fun PageCard(
                     Text("Ultimo cambio: ${monitor.lastChangeAtMillis.formatDate()}")
                     Text("Resultado: ${monitor.lastResult}")
                     Text("Enlaces conocidos: ${monitor.knownPublications.size}")
+                    Text("Diagnostico: ${monitor.lastDiagnostics}")
                     monitor.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
                 }
             }
@@ -464,7 +467,7 @@ private fun MonitorEditorDialog(
     var groupName by remember { mutableStateOf(initial.groupName) }
     var groupMenuOpen by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(initial.url) }
-    var interval by remember { mutableStateOf(initial.intervalMinutes) }
+    var interval by remember { mutableLongStateOf(initial.intervalMinutes) }
     var enabled by remember { mutableStateOf(initial.enabled) }
     var cssSelector by remember { mutableStateOf(initial.cssSelector) }
     var includeKeywords by remember { mutableStateOf(initial.includeKeywords) }
@@ -582,7 +585,7 @@ private fun SettingsDialog(
     onDismiss: () -> Unit,
     onSave: (Long, Boolean, String, String) -> Unit
 ) {
-    var defaultInterval by remember { mutableStateOf(state.defaultIntervalMinutes) }
+    var defaultInterval by remember { mutableLongStateOf(state.defaultIntervalMinutes) }
     var telegramEnabled by remember { mutableStateOf(state.telegramEnabled) }
     var telegramToken by remember { mutableStateOf(state.telegramBotToken) }
     var telegramChatId by remember { mutableStateOf(state.telegramChatId) }
@@ -652,4 +655,4 @@ private fun statusText(globalEnabled: Boolean, monitor: WebMonitor): String = wh
 }
 
 private fun parseColor(hex: String): Color =
-    runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color(0xFF063347))
+    runCatching { Color(hex.toColorInt()) }.getOrDefault(Color(0xFF063347))

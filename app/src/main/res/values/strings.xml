@@ -1,13 +1,5 @@
 <resources>
     <string name="app_name">Refresco Web</string>
-    <string name="target_section">Experto/a en evaluacion de politicas publicas</string>
-    <string name="monitoring_active">Comprobaciones automaticas</string>
-    <string name="check_now">Comprobar ahora</string>
-    <string name="open_page">Abrir pagina</string>
-    <string name="reset_reference">Restablecer referencia</string>
-    <string name="reset_confirm_title">Restablecer referencia</string>
-    <string name="reset_confirm_body">Se borraran los enlaces conocidos. La proxima comprobacion creara una referencia inicial sin notificar.</string>
-    <string name="confirm">Confirmar</string>
     <string name="cancel">Cancelar</string>
     <string name="notification_channel_name">Cambios en paginas vigiladas</string>
     <string name="notification_channel_description">Avisos cuando aparecen enlaces o documentos nuevos en una pagina vigilada.</string>

@@ -124,6 +124,41 @@ class AirefPublicationsParserTest {
         assertEquals(listOf("Calendario provisional"), result.publications.map { it.title })
     }
 
+    @Test
+    fun normalHtmlAndCodeLinksAreExtracted() {
+        val html = """
+            <html><body><main>
+              <a href="codigo/paletas_colores.R">Paletas de colores en R</a>
+              <a href="tema.html">Tema normal</a>
+            </main></body></html>
+        """.trimIndent()
+        val result = parser.parse(html) as ParserResult.Success
+        assertEquals(
+            setOf("https://example.com/codigo/paletas_colores.R", "https://example.com/tema.html"),
+            result.publications.map { it.url }.toSet()
+        )
+    }
+
+    @Test
+    fun snapshotChangesWhenTextMetadataOrImagesChange() {
+        val first = parser.parse("""
+            <html><head>
+              <meta property="og:description" content="Bio antigua">
+              <meta property="og:image" content="/avatar-a.jpg">
+            </head><body><main><p>Texto antiguo</p></main></body></html>
+        """.trimIndent()) as ParserResult.Success
+        val second = parser.parse("""
+            <html><head>
+              <meta property="og:description" content="Bio nueva">
+              <meta property="og:image" content="/avatar-b.jpg">
+            </head><body><main><p>Texto nuevo</p></main></body></html>
+        """.trimIndent()) as ParserResult.Success
+
+        assertTrue(first.snapshot.textHash != second.snapshot.textHash)
+        assertTrue(first.snapshot.metadataHash != second.snapshot.metadataHash)
+        assertTrue(first.snapshot.imagesHash != second.snapshot.imagesHash)
+    }
+
     private fun page(
         title: String = "Experto/a en evaluacion de politicas publicas",
         targetLinks: List<Pair<String, String>> = listOf("Base" to "/docs/base.pdf"),

@@ -6,7 +6,9 @@ import es.personal.avisosairef.data.network.AirefHttpClient
 import es.personal.avisosairef.data.network.FetchError
 import es.personal.avisosairef.data.network.FetchResult
 import es.personal.avisosairef.data.parser.AirefPublicationsParser
+import es.personal.avisosairef.data.parser.PageSnapshot
 import es.personal.avisosairef.data.parser.ParserResult
+import es.personal.avisosairef.data.parser.Publicacion
 import es.personal.avisosairef.data.storage.AppState
 import es.personal.avisosairef.data.storage.MonitorGroup
 import es.personal.avisosairef.data.storage.StateStore
@@ -138,7 +140,9 @@ class AirefRepository(
                     lastSuccessAtMillis = if (urlChanged) null else existing.lastSuccessAtMillis,
                     lastChangeAtMillis = if (urlChanged) null else existing.lastChangeAtMillis,
                     lastError = if (urlChanged) null else existing.lastError,
-                    lastResult = if (urlChanged) "Referencia pendiente: URL actualizada." else existing.lastResult
+                    lastResult = if (urlChanged) "Referencia pendiente: URL actualizada." else existing.lastResult,
+                    lastSnapshot = if (urlChanged) null else existing.lastSnapshot,
+                    lastDiagnostics = if (urlChanged) "URL actualizada; se creara una nueva referencia." else existing.lastDiagnostics
                 )
             }
             state.copy(
@@ -200,7 +204,8 @@ class AirefRepository(
                         lastModified = fetch.lastModified,
                         lastSuccessAtMillis = now,
                         lastError = null,
-                        lastResult = "Sin cambios: el servidor respondio 304."
+                        lastResult = "Sin cambios: el servidor respondio 304.",
+                        lastDiagnostics = diagnosticsForNotModified(fetch.eTag, fetch.lastModified)
                     )
                 }
                 CheckOutcome(CheckStatus.NotModified, "Sin cambios", monitor.id, monitor.name)
@@ -208,7 +213,13 @@ class AirefRepository(
 
             is FetchResult.Failure -> {
                 val message = fetch.error.toUserMessage()
-                updateMonitor(monitor.id) { it.copy(lastError = message, lastResult = message) }
+                updateMonitor(monitor.id) {
+                    it.copy(
+                        lastError = message,
+                        lastResult = message,
+                        lastDiagnostics = "Fallo de comprobacion. Estado anterior conservado. Motivo: $message"
+                    )
+                }
                 CheckOutcome(CheckStatus.Error, message, monitor.id, monitor.name, shouldRetry = fetch.error is FetchError.Network || fetch.error is FetchError.Http)
             }
 
@@ -231,7 +242,8 @@ class AirefRepository(
                         eTag = fetch.eTag,
                         lastModified = fetch.lastModified,
                         lastError = message,
-                        lastResult = message
+                        lastResult = message,
+                        lastDiagnostics = "Fallo de parsing. Estado anterior conservado. Motivo: $message"
                     )
                 }
                 CheckOutcome(CheckStatus.Error, message, monitor.id, monitor.name)
@@ -239,16 +251,18 @@ class AirefRepository(
 
             is ParserResult.Success -> {
                 val current = parsed.publications
-                if (monitor.knownPublications.isEmpty()) {
-                    val message = "Referencia inicial creada: ${current.size} enlaces encontrados."
+                if (monitor.knownPublications.isEmpty() && monitor.lastSnapshot == null) {
+                    val message = "Referencia inicial creada: ${current.size} enlaces y snapshot de pagina guardados."
                     updateMonitor(monitor.id) {
                         it.copy(
                             knownPublications = current,
+                            lastSnapshot = parsed.snapshot,
                             eTag = fetch.eTag,
                             lastModified = fetch.lastModified,
                             lastSuccessAtMillis = now,
                             lastError = null,
-                            lastResult = message
+                            lastResult = message,
+                            lastDiagnostics = diagnosticsForSnapshot(parsed.snapshot, fetch, firstReference = true)
                         )
                     }
                     return CheckOutcome(CheckStatus.Success, message, monitor.id, monitor.name, firstReferenceCreated = true)
@@ -256,25 +270,80 @@ class AirefRepository(
 
                 val knownKeys = monitor.knownPublications.map { it.key }.toSet()
                 val newItems = current.filterNot { it.key in knownKeys }
-                val recent = (newItems + monitor.recentPublications).distinctBy { it.key }.take(20)
-                val message = if (newItems.isEmpty()) "Comprobacion correcta: sin novedades." else "Novedades detectadas: ${newItems.size}."
+                val changes = snapshotChanges(monitor.lastSnapshot, parsed.snapshot)
+                val syntheticChanges = if (newItems.isEmpty() && changes.isNotEmpty()) {
+                    listOf(snapshotChangePublication(monitor.monitoredUrl, changes, parsed.snapshot))
+                } else {
+                    emptyList()
+                }
+                val detectedItems = newItems + syntheticChanges
+                val recent = (detectedItems + monitor.recentPublications).distinctBy { it.key }.take(20)
+                val message = when {
+                    detectedItems.isEmpty() -> "Comprobacion correcta: sin novedades."
+                    newItems.isNotEmpty() && changes.isNotEmpty() -> "Novedades detectadas: ${newItems.size} enlaces y cambios en ${changes.joinToString(", ")}."
+                    newItems.isNotEmpty() -> "Novedades detectadas: ${newItems.size} enlaces."
+                    else -> "Cambio detectado en ${changes.joinToString(", ")}."
+                }
                 updateMonitor(monitor.id) {
                     it.copy(
                         knownPublications = current,
-                        unseenPublications = (newItems + it.unseenPublications).distinctBy { pub -> pub.key },
+                        lastSnapshot = parsed.snapshot,
+                        unseenPublications = (detectedItems + it.unseenPublications).distinctBy { pub -> pub.key },
                         recentPublications = recent,
                         eTag = fetch.eTag,
                         lastModified = fetch.lastModified,
                         lastSuccessAtMillis = now,
-                        lastChangeAtMillis = if (newItems.isNotEmpty()) now else it.lastChangeAtMillis,
+                        lastChangeAtMillis = if (detectedItems.isNotEmpty()) now else it.lastChangeAtMillis,
                         lastError = null,
-                        lastResult = message
+                        lastResult = message,
+                        lastDiagnostics = diagnosticsForSnapshot(parsed.snapshot, fetch, changes)
                     )
                 }
-                CheckOutcome(CheckStatus.Success, if (newItems.isEmpty()) "Sin novedades" else "${newItems.size} novedades", monitor.id, monitor.name, newItems)
+                CheckOutcome(CheckStatus.Success, if (detectedItems.isEmpty()) "Sin novedades" else "${detectedItems.size} novedades", monitor.id, monitor.name, detectedItems)
             }
         }
     }
+
+    private fun snapshotChanges(previous: PageSnapshot?, current: PageSnapshot): List<String> {
+        if (previous == null) return emptyList()
+        val changes = mutableListOf<String>()
+        if (previous.textHash != current.textHash) changes += "texto visible"
+        if (previous.domHash != current.domHash) changes += "estructura DOM"
+        if (previous.linksHash != current.linksHash) changes += "enlaces"
+        if (previous.metadataHash != current.metadataHash) changes += "metadatos"
+        if (previous.imagesHash != current.imagesHash) changes += "imagenes/avatar"
+        return changes
+    }
+
+    private fun snapshotChangePublication(url: String, changes: List<String>, snapshot: PageSnapshot): Publicacion {
+        val title = "Cambio detectado: ${changes.joinToString(", ")}"
+        val key = "snapshot:${snapshot.combinedHash}:$url"
+        return Publicacion(
+            title = title,
+            normalizedTitle = title.lowercase(),
+            url = url,
+            key = key,
+            type = "Cambio",
+            detectedDate = null
+        )
+    }
+
+    private fun diagnosticsForNotModified(eTag: String?, lastModified: String?): String =
+        "HTTP 304 sin cambios. ETag=${eTag ?: "no disponible"}; Last-Modified=${lastModified ?: "no disponible"}."
+
+    private fun diagnosticsForSnapshot(snapshot: PageSnapshot, fetch: FetchResult.Success, changes: List<String> = emptyList(), firstReference: Boolean = false): String =
+        buildString {
+            append(if (firstReference) "Referencia inicial. " else "Snapshot comparado. ")
+            append("Cambios=${changes.ifEmpty { listOf("ninguno") }.joinToString(", ")}. ")
+            append("Texto=${snapshot.visibleTextLength} caracteres; enlaces=${snapshot.linkCount}; imagenes=${snapshot.imageCount}; metadatos=${snapshot.metadataCount}. ")
+            append("Hashes texto=${snapshot.textHash.take(12)}, dom=${snapshot.domHash.take(12)}, enlaces=${snapshot.linksHash.take(12)}, meta=${snapshot.metadataHash.take(12)}, imagenes=${snapshot.imagesHash.take(12)}. ")
+            append("Bytes=${fetch.bytesRead.takeIf { it >= 0 } ?: fetch.html.length}. ")
+            append("URL final=${fetch.finalUrl ?: "no disponible"}. ")
+            append("ETag=${fetch.eTag ?: "no disponible"}; Last-Modified=${fetch.lastModified ?: "no disponible"}.")
+            if (snapshot.dynamicHints.isNotEmpty()) {
+                append(" Diagnostico dinamico: ${snapshot.dynamicHints.joinToString(" ")}")
+            }
+        }
 
     private suspend fun updateMonitor(monitorId: String, transform: (WebMonitor) -> WebMonitor) {
         store.update { state ->

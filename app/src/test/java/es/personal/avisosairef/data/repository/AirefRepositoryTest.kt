@@ -121,6 +121,21 @@ class AirefRepositoryTest {
         assertTrue(!restored.monitors.first { it.id == secondId }.enabled)
     }
 
+    @Test
+    fun textChangeWithoutNewLinksProducesNovelty() = runTest {
+        val fetcher = QueueFetcher(
+            FetchResult.Success("<html><body><main><p>Bio antigua</p></main></body></html>", null, null),
+            FetchResult.Success("<html><body><main><p>Bio nueva</p></main></body></html>", null, null)
+        )
+        val repository = repositoryWith(fetcher)
+        repository.checkNow()
+        val outcome = repository.checkNow()
+
+        assertEquals(CheckStatus.Success, outcome.status)
+        assertEquals(listOf("Cambio"), outcome.newPublications.map { it.type })
+        assertTrue(repositoryState(repository).selectedMonitor.lastDiagnostics.contains("texto visible"))
+    }
+
     private fun repositoryWith(fetcher: AirefFetcher): AirefRepository {
         return AirefRepository(MemoryStore(), fetcher, clock = { 1_000L })
     }

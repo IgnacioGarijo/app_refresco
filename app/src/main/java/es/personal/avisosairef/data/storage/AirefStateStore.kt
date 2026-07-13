@@ -53,7 +53,9 @@ class AirefStateStore(private val context: Context) : StateStore {
                             lastModified = null,
                             lastChangeAtMillis = null,
                             lastError = null,
-                            lastResult = "Referencia pendiente"
+                            lastResult = "Referencia pendiente",
+                            lastSnapshot = null,
+                            lastDiagnostics = "Referencia restablecida."
                         )
                     }
                 }
