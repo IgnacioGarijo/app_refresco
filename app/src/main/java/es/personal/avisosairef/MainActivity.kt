@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,11 +20,26 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -40,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -50,6 +67,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import es.personal.avisosairef.data.storage.AppState
+import es.personal.avisosairef.data.storage.MonitorGroup
 import es.personal.avisosairef.data.storage.WebMonitor
 import es.personal.avisosairef.ui.theme.RefrescoWebTheme
 import es.personal.avisosairef.worker.AirefWorkScheduler
@@ -57,7 +75,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.absoluteValue
+import java.text.DateFormat
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,6 +118,14 @@ class MainViewModel(
         }
     }
 
+    fun saveGroup(draft: GroupDraft) {
+        viewModelScope.launch { repository.upsertGroup(draft.originalName, draft.name, draft.colorHex) }
+    }
+
+    fun toggleGroup(name: String) {
+        viewModelScope.launch { repository.toggleGroupCollapsed(name) }
+    }
+
     fun saveMonitor(context: android.content.Context, draft: MonitorDraft) {
         viewModelScope.launch {
             settingsError = null
@@ -106,7 +133,7 @@ class MainViewModel(
                 repository.upsertMonitor(
                     id = draft.id,
                     name = draft.name,
-                    folder = draft.type,
+                    folder = draft.groupName,
                     url = draft.url,
                     intervalMinutes = draft.intervalMinutes,
                     enabled = draft.enabled,
@@ -160,7 +187,7 @@ class MainViewModel(
 data class MonitorDraft(
     val id: String?,
     val name: String,
-    val type: String,
+    val groupName: String,
     val url: String,
     val intervalMinutes: Long,
     val enabled: Boolean,
@@ -171,7 +198,7 @@ data class MonitorDraft(
         fun from(monitor: WebMonitor): MonitorDraft = MonitorDraft(
             id = monitor.id,
             name = monitor.name,
-            type = monitor.folder,
+            groupName = monitor.folder,
             url = monitor.monitoredUrl,
             intervalMinutes = monitor.intervalMinutes,
             enabled = monitor.enabled,
@@ -179,10 +206,10 @@ data class MonitorDraft(
             includeKeywords = monitor.includeKeywords
         )
 
-        fun empty(defaultIntervalMinutes: Long): MonitorDraft = MonitorDraft(
+        fun empty(defaultIntervalMinutes: Long, groups: List<MonitorGroup>): MonitorDraft = MonitorDraft(
             id = null,
             name = "",
-            type = "General",
+            groupName = groups.firstOrNull()?.name ?: "General",
             url = "https://",
             intervalMinutes = defaultIntervalMinutes,
             enabled = true,
@@ -192,11 +219,23 @@ data class MonitorDraft(
     }
 }
 
+data class GroupDraft(
+    val originalName: String?,
+    val name: String,
+    val colorHex: String
+) {
+    companion object {
+        fun empty(): GroupDraft = GroupDraft(null, "", "#063347")
+        fun from(group: MonitorGroup): GroupDraft = GroupDraft(group.name, group.name, group.colorHex)
+    }
+}
+
 @Composable
 private fun WebRefreshScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    var editDraft by remember { mutableStateOf<MonitorDraft?>(null) }
+    var editMonitor by remember { mutableStateOf<MonitorDraft?>(null) }
+    var editGroup by remember { mutableStateOf<GroupDraft?>(null) }
     var deleteTarget by remember { mutableStateOf<WebMonitor?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -219,38 +258,37 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                        Text("${state.monitors.size} paginas configuradas", style = MaterialTheme.typography.bodySmall)
-                    }
-                    OutlinedButton(onClick = { showSettings = true }) { Text("Ajustes") }
-                }
-            }
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text("Comprobaciones automaticas", fontWeight = FontWeight.SemiBold)
-                            Switch(checked = state.monitoringEnabled, onCheckedChange = { viewModel.setMonitoring(context, it) })
-                        }
-                        Text("Activa o detiene todas las revisiones en segundo plano.")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Switch(checked = state.monitoringEnabled, onCheckedChange = { viewModel.setMonitoring(context, it) })
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Ajustes")
                     }
                 }
             }
             item {
-                Button(onClick = { editDraft = MonitorDraft.empty(state.defaultIntervalMinutes) }) {
-                    Text("Anadir pagina")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { editMonitor = MonitorDraft.empty(state.defaultIntervalMinutes, state.groups) }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text("Pagina")
+                    }
+                    OutlinedButton(onClick = { editGroup = GroupDraft.empty() }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text("Grupo")
+                    }
                 }
             }
-            state.monitors.groupBy { it.folder.ifBlank { "General" } }.forEach { (type, monitors) ->
+            state.groups.forEach { group ->
+                val monitors = state.monitors.filter { it.folder == group.name }
                 item {
-                    TypeCard(
-                        type = type,
-                        color = colorForType(type),
+                    GroupCard(
+                        group = group,
                         monitors = monitors,
+                        globalEnabled = state.monitoringEnabled,
                         checkingId = viewModel.checkingId,
-                        onEdit = { editDraft = MonitorDraft.from(it) },
+                        onToggle = { viewModel.toggleGroup(group.name) },
+                        onEditGroup = { editGroup = GroupDraft.from(group) },
+                        onEdit = { editMonitor = MonitorDraft.from(it) },
                         onRefresh = { viewModel.checkNow(it.id) },
                         onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.monitoredUrl))) },
                         onDelete = { deleteTarget = it },
@@ -261,14 +299,26 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
         }
     }
 
-    editDraft?.let { draft ->
+    editMonitor?.let { draft ->
         MonitorEditorDialog(
             initial = draft,
+            groups = state.groups,
             error = viewModel.settingsError,
-            onDismiss = { editDraft = null },
+            onDismiss = { editMonitor = null },
             onSave = {
                 viewModel.saveMonitor(context, it)
-                editDraft = null
+                editMonitor = null
+            }
+        )
+    }
+
+    editGroup?.let { draft ->
+        GroupEditorDialog(
+            initial = draft,
+            onDismiss = { editGroup = null },
+            onSave = {
+                viewModel.saveGroup(it)
+                editGroup = null
             }
         )
     }
@@ -301,17 +351,20 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun TypeCard(
-    type: String,
-    color: Color,
+private fun GroupCard(
+    group: MonitorGroup,
     monitors: List<WebMonitor>,
+    globalEnabled: Boolean,
     checkingId: String?,
+    onToggle: () -> Unit,
+    onEditGroup: () -> Unit,
     onEdit: (WebMonitor) -> Unit,
     onRefresh: (WebMonitor) -> Unit,
     onOpen: (WebMonitor) -> Unit,
     onDelete: (WebMonitor) -> Unit,
     onEnabledChange: (WebMonitor, Boolean) -> Unit
 ) {
+    val color = parseColor(group.colorHex)
     Card(Modifier.fillMaxWidth()) {
         Column {
             Box(
@@ -320,18 +373,38 @@ private fun TypeCard(
                     .height(6.dp)
                     .background(color)
             )
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(type, fontWeight = FontWeight.Bold, color = color)
-                monitors.forEach { monitor ->
-                    PageCard(
-                        monitor = monitor,
-                        isChecking = checkingId == monitor.id,
-                        onEdit = { onEdit(monitor) },
-                        onRefresh = { onRefresh(monitor) },
-                        onOpen = { onOpen(monitor) },
-                        onDelete = { onDelete(monitor) },
-                        onEnabledChange = { onEnabledChange(monitor, it) }
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(group.name, fontWeight = FontWeight.Bold, color = color)
+                    Text("${monitors.size} paginas", style = MaterialTheme.typography.bodySmall)
+                }
+                IconButton(onClick = onEditGroup) {
+                    Icon(Icons.Default.Edit, contentDescription = "Editar grupo")
+                }
+                IconButton(onClick = onToggle) {
+                    Icon(if (group.collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess, contentDescription = "Plegar grupo")
+                }
+            }
+            if (!group.collapsed) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    monitors.forEach { monitor ->
+                        PageCard(
+                            monitor = monitor,
+                            globalEnabled = globalEnabled,
+                            isChecking = checkingId == monitor.id,
+                            onEdit = { onEdit(monitor) },
+                            onRefresh = { onRefresh(monitor) },
+                            onOpen = { onOpen(monitor) },
+                            onDelete = { onDelete(monitor) },
+                            onEnabledChange = { onEnabledChange(monitor, it) }
+                        )
+                    }
                 }
             }
         }
@@ -341,6 +414,7 @@ private fun TypeCard(
 @Composable
 private fun PageCard(
     monitor: WebMonitor,
+    globalEnabled: Boolean,
     isChecking: Boolean,
     onEdit: () -> Unit,
     onRefresh: () -> Unit,
@@ -348,17 +422,31 @@ private fun PageCard(
     onDelete: () -> Unit,
     onEnabledChange: (Boolean) -> Unit
 ) {
+    var showDetails by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                 Text(monitor.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Switch(checked = monitor.enabled, onCheckedChange = onEnabledChange)
+                Switch(checked = monitor.enabled, enabled = globalEnabled, onCheckedChange = onEnabledChange)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onEdit) { Text("Editar") }
-                OutlinedButton(onClick = onRefresh, enabled = !isChecking) { Text(if (isChecking) "..." else "Refrescar") }
-                OutlinedButton(onClick = onOpen) { Text("Abrir") }
-                TextButton(onClick = onDelete) { Text("Eliminar") }
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Editar") }
+                IconButton(onClick = onRefresh, enabled = !isChecking && globalEnabled) { Icon(Icons.Default.Refresh, contentDescription = "Refrescar") }
+                IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Abrir") }
+                IconButton(onClick = { showDetails = !showDetails }) { Icon(Icons.Default.Info, contentDescription = "Detalles") }
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Eliminar") }
+            }
+            if (showDetails) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(monitor.monitoredUrl, style = MaterialTheme.typography.bodySmall)
+                    Text("Estado: ${statusText(globalEnabled, monitor)}")
+                    Text("Ultima comprobacion intentada: ${monitor.lastAttemptAtMillis.formatDate()}")
+                    Text("Ultima comprobacion correcta: ${monitor.lastSuccessAtMillis.formatDate()}")
+                    Text("Ultimo cambio: ${monitor.lastChangeAtMillis.formatDate()}")
+                    Text("Resultado: ${monitor.lastResult}")
+                    Text("Enlaces conocidos: ${monitor.knownPublications.size}")
+                    monitor.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
     }
@@ -367,12 +455,14 @@ private fun PageCard(
 @Composable
 private fun MonitorEditorDialog(
     initial: MonitorDraft,
+    groups: List<MonitorGroup>,
     error: String?,
     onDismiss: () -> Unit,
     onSave: (MonitorDraft) -> Unit
 ) {
     var name by remember { mutableStateOf(initial.name) }
-    var type by remember { mutableStateOf(initial.type) }
+    var groupName by remember { mutableStateOf(initial.groupName) }
+    var groupMenuOpen by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(initial.url) }
     var interval by remember { mutableStateOf(initial.intervalMinutes) }
     var enabled by remember { mutableStateOf(initial.enabled) }
@@ -385,7 +475,24 @@ private fun MonitorEditorDialog(
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre de la tarjeta") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = type, onValueChange = { type = it }, label = { Text("Tipo") }, modifier = Modifier.fillMaxWidth()) }
+                item {
+                    Box {
+                        OutlinedButton(onClick = { groupMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Grupo: $groupName")
+                        }
+                        DropdownMenu(expanded = groupMenuOpen, onDismissRequest = { groupMenuOpen = false }) {
+                            groups.forEach { group ->
+                                DropdownMenuItem(
+                                    text = { Text(group.name) },
+                                    onClick = {
+                                        groupName = group.name
+                                        groupMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
                 item { OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("URL HTTPS") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4) }
                 item {
                     Text("Frecuencia aproximada", fontWeight = FontWeight.SemiBold)
@@ -425,19 +532,45 @@ private fun MonitorEditorDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(
-                    MonitorDraft(
-                        id = initial.id,
-                        name = name,
-                        type = type,
-                        url = url,
-                        intervalMinutes = interval,
-                        enabled = enabled,
-                        cssSelector = cssSelector,
-                        includeKeywords = includeKeywords
-                    )
-                )
+                onSave(MonitorDraft(initial.id, name, groupName, url, interval, enabled, cssSelector, includeKeywords))
             }) { Text("Guardar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
+    )
+}
+
+@Composable
+private fun GroupEditorDialog(
+    initial: GroupDraft,
+    onDismiss: () -> Unit,
+    onSave: (GroupDraft) -> Unit
+) {
+    var name by remember { mutableStateOf(initial.name) }
+    var colorHex by remember { mutableStateOf(initial.colorHex) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial.originalName == null) "Anadir grupo" else "Editar grupo") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre del grupo") }, modifier = Modifier.fillMaxWidth())
+                Text("Color", fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    groupColorOptions.forEach { option ->
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(parseColor(option))
+                                .clickable { colorHex = option }
+                        )
+                    }
+                }
+                Text(colorHex, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(GroupDraft(initial.originalName, name, colorHex)) }) { Text("Guardar") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
@@ -490,6 +623,16 @@ private fun SettingsDialog(
 
 private val intervalOptions = listOf(15L, 30L, 60L, 120L)
 
+private val groupColorOptions = listOf(
+    "#063347",
+    "#2F6F73",
+    "#4F6F52",
+    "#6B5B7A",
+    "#8A5A44",
+    "#3F5F8A",
+    "#B3BEC6"
+)
+
 private fun Long.intervalLabel(): String = when (this) {
     15L -> "15 min"
     30L -> "30 min"
@@ -498,14 +641,15 @@ private fun Long.intervalLabel(): String = when (this) {
     else -> "$this min"
 }
 
-private fun colorForType(type: String): Color {
-    val palette = listOf(
-        Color(0xFF063347),
-        Color(0xFF2F6F73),
-        Color(0xFF4F6F52),
-        Color(0xFF6B5B7A),
-        Color(0xFF8A5A44),
-        Color(0xFF3F5F8A)
-    )
-    return palette[type.lowercase().hashCode().absoluteValue % palette.size]
+private fun Long?.formatDate(): String =
+    this?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) } ?: "Nunca"
+
+private fun statusText(globalEnabled: Boolean, monitor: WebMonitor): String = when {
+    !globalEnabled || !monitor.enabled -> "detenida"
+    monitor.lastError != null -> "error"
+    monitor.knownPublications.isEmpty() -> "referencia pendiente"
+    else -> "activa"
 }
+
+private fun parseColor(hex: String): Color =
+    runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color(0xFF063347))

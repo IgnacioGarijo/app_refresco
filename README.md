@@ -5,9 +5,11 @@ Aplicacion Android nativa, ligera y local para revisar paginas web periodicament
 ## Que hace
 
 - Permite configurar varias paginas.
-- Agrupa paginas por tipo, con color propio por grupo.
+- Agrupa paginas por grupo, con color propio elegido por el usuario.
 - Cada pagina tiene nombre, URL, frecuencia, selector CSS opcional y palabras clave opcionales.
-- Las tarjetas de pagina muestran solo lo esencial: nombre, editar, refrescar, abrir, eliminar e interruptor individual.
+- Las tarjetas de pagina muestran solo lo esencial: nombre, iconos de editar, refrescar, abrir, detalles, eliminar e interruptor individual.
+- Cada grupo puede plegarse o desplegarse para ocultar sus paginas.
+- El interruptor maestro esta en la cabecera: al apagarlo desactiva las paginas y al encenderlo restaura las que estaban activas.
 - Descarga solo el HTML de la pagina configurada.
 - Extrae enlaces razonablemente relevantes del contenido principal: PDF, WordPress uploads, BOE y enlaces cuyo texto parezca una resolucion, listado, nota, calendario, cronograma, plantilla o modelo.
 - Guarda una referencia inicial por pagina en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
@@ -23,7 +25,7 @@ La pantalla principal tiene:
 - Cabecera con acceso a Ajustes.
 - Interruptor maestro **Comprobaciones automaticas**.
 - Boton para anadir paginas.
-- Tarjetas de tipo o categoria.
+- Tarjetas de grupo.
 - Tarjetas internas de pagina.
 
 Los ajustes incluyen:
@@ -132,7 +134,7 @@ dist/RefrescoWeb.apk
 SHA-256:
 
 ```text
-1473BC713A8C73E3E75C8DC672AAC010608625C99F883AA9F27E72F666076881
+1AA181BF1274426B7C6AE85B2203D05D9B0EFBA81E4779AC230D712115D4B8B6
 ```
 
 Calcular hash local:

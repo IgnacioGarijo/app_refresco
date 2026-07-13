@@ -8,8 +8,10 @@ import kotlinx.serialization.Serializable
 data class AppState(
     val formatVersion: Int = 2,
     val monitors: List<WebMonitor> = listOf(WebMonitor.default()),
+    val groups: List<MonitorGroup> = listOf(MonitorGroup.default()),
     val selectedMonitorId: String = monitors.firstOrNull()?.id ?: Constants.DefaultMonitorId,
     val monitoringEnabled: Boolean = true,
+    val pausedMonitorIds: List<String> = emptyList(),
     val telegramEnabled: Boolean = false,
     val telegramBotToken: String = "",
     val telegramChatId: String = "",
@@ -17,6 +19,17 @@ data class AppState(
 ) {
     val selectedMonitor: WebMonitor
         get() = monitors.firstOrNull { it.id == selectedMonitorId } ?: monitors.firstOrNull() ?: WebMonitor.default()
+}
+
+@Serializable
+data class MonitorGroup(
+    val name: String,
+    val colorHex: String,
+    val collapsed: Boolean = false
+) {
+    companion object {
+        fun default(): MonitorGroup = MonitorGroup("General", "#063347")
+    }
 }
 
 @Serializable

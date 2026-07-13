@@ -66,9 +66,8 @@ class AirefStateStore(private val context: Context) : StateStore {
     }
 }
 
-private fun AppState.withoutLegacyLabels(): AppState =
-    copy(
-        monitors = monitors.map { monitor ->
+private fun AppState.withoutLegacyLabels(): AppState {
+    val migratedMonitors = monitors.map { monitor ->
             if (monitor.id == "default_airef") {
                 monitor.copy(
                     name = "Pagina principal",
@@ -78,4 +77,19 @@ private fun AppState.withoutLegacyLabels(): AppState =
                 monitor
             }
         }
+    val existingNames = groups.map { it.name }.toSet()
+    val missingGroups = migratedMonitors
+        .map { it.folder.ifBlank { "General" } }
+        .distinct()
+        .filterNot { it in existingNames }
+        .map { MonitorGroup(it, defaultColorForGroup(it)) }
+    return copy(
+        monitors = migratedMonitors,
+        groups = (groups.ifEmpty { listOf(MonitorGroup.default()) } + missingGroups).distinctBy { it.name }
     )
+}
+
+private fun defaultColorForGroup(name: String): String {
+    val palette = listOf("#063347", "#2F6F73", "#4F6F52", "#6B5B7A", "#8A5A44", "#3F5F8A")
+    return palette[kotlin.math.abs(name.lowercase().hashCode()) % palette.size]
+}

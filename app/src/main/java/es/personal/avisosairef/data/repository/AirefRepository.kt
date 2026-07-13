@@ -8,6 +8,7 @@ import es.personal.avisosairef.data.network.FetchResult
 import es.personal.avisosairef.data.parser.AirefPublicationsParser
 import es.personal.avisosairef.data.parser.ParserResult
 import es.personal.avisosairef.data.storage.AppState
+import es.personal.avisosairef.data.storage.MonitorGroup
 import es.personal.avisosairef.data.storage.StateStore
 import es.personal.avisosairef.data.storage.WebMonitor
 import kotlinx.coroutines.flow.Flow
@@ -22,7 +23,24 @@ class AirefRepository(
     val state: Flow<AppState> = store.state
 
     suspend fun setMonitoringEnabled(enabled: Boolean) {
-        store.update { it.copy(monitoringEnabled = enabled) }
+        store.update { state ->
+            if (enabled) {
+                val restoreIds = state.pausedMonitorIds.toSet()
+                state.copy(
+                    monitoringEnabled = true,
+                    monitors = state.monitors.map { monitor ->
+                        if (monitor.id in restoreIds) monitor.copy(enabled = true) else monitor
+                    },
+                    pausedMonitorIds = emptyList()
+                )
+            } else {
+                state.copy(
+                    monitoringEnabled = false,
+                    pausedMonitorIds = state.monitors.filter { it.enabled }.map { it.id },
+                    monitors = state.monitors.map { it.copy(enabled = false) }
+                )
+            }
+        }
     }
 
     suspend fun updateTelegramSettings(enabled: Boolean, botToken: String, chatId: String) {
@@ -48,6 +66,29 @@ class AirefRepository(
     suspend fun setMonitorEnabled(monitorId: String, enabled: Boolean) {
         store.update { state ->
             state.copy(monitors = state.monitors.map { if (it.id == monitorId) it.copy(enabled = enabled) else it })
+        }
+    }
+
+    suspend fun upsertGroup(originalName: String?, name: String, colorHex: String) {
+        val cleanName = name.trim().ifBlank { "General" }
+        val cleanColor = colorHex.trim().ifBlank { "#063347" }
+        store.update { state ->
+            val original = originalName?.trim().orEmpty()
+            val existing = state.groups.firstOrNull { it.name == original || it.name == cleanName }
+            val updatedGroup = (existing ?: MonitorGroup(cleanName, cleanColor)).copy(name = cleanName, colorHex = cleanColor)
+            state.copy(
+                groups = (state.groups.filterNot { it.name == original || it.name == cleanName } + updatedGroup)
+                    .sortedBy { it.name.lowercase() },
+                monitors = state.monitors.map { monitor ->
+                    if (original.isNotBlank() && monitor.folder == original) monitor.copy(folder = cleanName) else monitor
+                }
+            )
+        }
+    }
+
+    suspend fun toggleGroupCollapsed(name: String) {
+        store.update { state ->
+            state.copy(groups = state.groups.map { if (it.name == name) it.copy(collapsed = !it.collapsed) else it })
         }
     }
 

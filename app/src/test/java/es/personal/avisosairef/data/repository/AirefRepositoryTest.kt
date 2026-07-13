@@ -99,6 +99,28 @@ class AirefRepositoryTest {
         assertEquals(1, repositoryState(repository).selectedMonitor.knownPublications.size)
     }
 
+    @Test
+    fun masterSwitchRestoresPreviouslyEnabledPages() = runTest {
+        val repository = repositoryWith(FakeFetcher(FetchResult.Success(html("A", "/a.pdf"), null, null)))
+        val secondId = repository.upsertMonitor(
+            id = null,
+            name = "Pausada",
+            folder = "Pruebas",
+            url = "https://example.com/paused",
+            intervalMinutes = 30,
+            enabled = false,
+            cssSelector = "",
+            includeKeywords = ""
+        )
+        repository.setMonitoringEnabled(false)
+        assertTrue(repositoryState(repository).monitors.none { it.enabled })
+
+        repository.setMonitoringEnabled(true)
+        val restored = repositoryState(repository)
+        assertTrue(restored.monitors.first { it.id != secondId }.enabled)
+        assertTrue(!restored.monitors.first { it.id == secondId }.enabled)
+    }
+
     private fun repositoryWith(fetcher: AirefFetcher): AirefRepository {
         return AirefRepository(MemoryStore(), fetcher, clock = { 1_000L })
     }
