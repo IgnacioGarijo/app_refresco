@@ -1,13 +1,13 @@
 package es.personal.avisosairef.data.network
 
 import android.content.Context
-import es.personal.avisosairef.Constants
 import es.personal.avisosairef.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.URI
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -23,11 +23,12 @@ interface AirefFetcher {
 }
 
 class AirefHttpClient private constructor(
-    private val client: OkHttpClient
+    private val defaultClient: OkHttpClient,
+    private val airefClient: OkHttpClient?
 ) : AirefFetcher {
-    constructor(context: Context) : this(buildClient(context.applicationContext))
+    constructor(context: Context) : this(buildBaseClient(), buildAirefClient(context.applicationContext))
 
-    constructor() : this(buildClient(null))
+    constructor() : this(buildBaseClient(), null)
 
     override suspend fun fetch(url: String, eTag: String?, lastModified: String?): FetchResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -42,7 +43,7 @@ class AirefHttpClient private constructor(
             .build()
 
         try {
-            client.newCall(request).execute().use { response ->
+            clientFor(url).newCall(request).execute().use { response ->
                 val newETag = response.header("ETag") ?: eTag
                 val newLastModified = response.header("Last-Modified") ?: lastModified
                 if (response.code == 304) return@withContext FetchResult.NotModified(newETag, newLastModified)
@@ -61,28 +62,37 @@ class AirefHttpClient private constructor(
         }
     }
 
+    private fun clientFor(url: String): OkHttpClient {
+        val host = runCatching { URI(url).host.orEmpty().lowercase() }.getOrDefault("")
+        return if ((host == "airef.es" || host.endsWith(".airef.es")) && airefClient != null) {
+            airefClient
+        } else {
+            defaultClient
+        }
+    }
+
     private companion object {
         const val MAX_BYTES = 1_500_000L
 
-        fun buildClient(context: Context?): OkHttpClient {
-            val builder = OkHttpClient.Builder()
+        fun buildBaseClient(): OkHttpClient =
+            OkHttpClient.Builder()
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(20, TimeUnit.SECONDS)
                 .callTimeout(30, TimeUnit.SECONDS)
+                .build()
 
-            if (context != null) {
-                val trustManager = CompositeTrustManager(
-                    listOf(systemTrustManager(), fnmtTrustManager(context))
-                )
-                val sslContext = SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(trustManager), null)
-                }
-                builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+        fun buildAirefClient(context: Context): OkHttpClient {
+            val trustManager = CompositeTrustManager(
+                listOf(systemTrustManager(), fnmtTrustManager(context))
+            )
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf<TrustManager>(trustManager), null)
             }
-
-            return builder.build()
+            return buildBaseClient().newBuilder()
+                .sslSocketFactory(sslContext.socketFactory, trustManager)
+                .build()
         }
 
         fun systemTrustManager(): X509TrustManager {

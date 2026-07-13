@@ -2,35 +2,36 @@
 
 Aplicacion Android nativa, ligera y local para revisar paginas web periodicamente y avisar cuando aparecen enlaces o documentos nuevos.
 
-La app nace para usar principalmente esta pagina de AIReF, que queda configurada como URL inicial:
-
-https://www.airef.es/es/sobre-nosotros/gestion-de-personal/provision-de-puestos-de-trabajo/personal-laboral-fijo-2025-2/
-
-Tambien puede vigilar otras paginas HTTPS desde la propia interfaz.
-
 ## Que hace
 
+- Permite configurar varias paginas.
+- Agrupa paginas por tipo, con color propio por grupo.
+- Cada pagina tiene nombre, URL, frecuencia, selector CSS opcional y palabras clave opcionales.
+- Las tarjetas de pagina muestran solo lo esencial: nombre, editar, refrescar, abrir, eliminar e interruptor individual.
 - Descarga solo el HTML de la pagina configurada.
-- Permite configurar varias paginas, con nombre, carpeta/etiqueta y frecuencia propia.
-- Extrae enlaces razonablemente relevantes del contenido principal: PDF, enlaces de WordPress uploads, BOE y enlaces cuyo texto parezca una resolucion, listado, nota, calendario, cronograma, plantilla o modelo.
-- Permite limitar una pagina por selector CSS opcional y por palabras clave.
+- Extrae enlaces razonablemente relevantes del contenido principal: PDF, WordPress uploads, BOE y enlaces cuyo texto parezca una resolucion, listado, nota, calendario, cronograma, plantilla o modelo.
 - Guarda una referencia inicial por pagina en la primera comprobacion correcta y no notifica en esa primera sincronizacion.
 - En comprobaciones posteriores avisa si aparecen enlaces nuevos.
 - Conserva todo localmente con DataStore: paginas, frecuencias, enlaces conocidos, ultimas novedades, ETag, Last-Modified, ultimos estados, errores y ajustes de Telegram.
 - Usa WorkManager con un trabajo periodico unico.
 - No usa Firebase, analitica, publicidad, cuentas ni APIs de pago. Telegram es opcional y solo se contacta con `api.telegram.org` si lo activas.
 
-## Cambio de enfoque
+## Interfaz
 
-La app ya no esta planteada como "Avisos AIReF". Ahora es un monitor general de paginas llamado **Refresco Web**.
+La pantalla principal tiene:
 
-AIReF sigue apareciendo solo como:
+- Cabecera con acceso a Ajustes.
+- Interruptor maestro **Comprobaciones automaticas**.
+- Boton para anadir paginas.
+- Tarjetas de tipo o categoria.
+- Tarjetas internas de pagina.
 
-- URL inicial por defecto.
-- Compatibilidad TLS especifica para `airef.es`.
-- Filtro opcional avanzado para el apartado "Experto/a en evaluacion de politicas publicas".
+Los ajustes incluyen:
 
-Por defecto el filtro esta desactivado. Esto significa que la app vigila cambios relevantes en toda la pagina, que es el comportamiento recomendado para el uso actual.
+- Frecuencia por defecto para nuevas paginas.
+- Avisos por Telegram.
+- Bot token.
+- Chat ID.
 
 ## Notificaciones externas
 
@@ -54,19 +55,13 @@ El modo oscuro usa variantes mas claras para mantener contraste.
 
 ## Estrategia de extraccion
 
-Modo normal:
-
 1. Jsoup analiza el HTML inicial.
-2. El parser toma como zona principal `main article`, `article`, `main`, `body` o el documento completo, en ese orden.
-3. Dentro de esa zona recopila enlaces `<a href>`.
-4. Filtra enlaces que parezcan publicaciones/documentos para evitar menus, cookies, estilos, scripts o navegacion.
-5. Normaliza titulo y URL, elimina tracking, convierte relativas en absolutas y deduplica por URL normalizada.
-
-Modo opcional de apartado:
-
-1. Busca un encabezado cuyo texto normalizado coincida con "Experto/a en evaluacion de politicas publicas".
-2. Extrae enlaces del bloque asociado hasta el siguiente encabezado profesional.
-3. Si no encuentra el apartado, informa error de parsing sin borrar el estado previo.
+2. Si hay selector CSS, se extraen enlaces dentro de los elementos que coincidan.
+3. Si no hay selector, el parser toma como zona principal `main article`, `article`, `main`, `body` o el documento completo, en ese orden.
+4. Dentro de esa zona recopila enlaces `<a href>`.
+5. Filtra enlaces que parezcan publicaciones/documentos para evitar menus, cookies, estilos, scripts o navegacion.
+6. Aplica palabras clave si se han configurado.
+7. Normaliza titulo y URL, elimina tracking, convierte relativas en absolutas y deduplica por URL normalizada.
 
 ## Trabajo en segundo plano
 
@@ -94,11 +89,11 @@ Cada comprobacion hace una sola peticion HTTP a la URL configurada:
 - Limita el cuerpo HTML a 1,5 MB.
 - No descarga PDF, imagenes, fuentes, CSS ni JavaScript.
 
-## TLS en airef.es
+## TLS
 
-La web de AIReF puede presentar problemas de confianza TLS en algunos dispositivos Android por su cadena FNMT. La app mantiene validacion TLS estricta y no acepta certificados invalidos.
+Para URLs normales se usa el almacen de certificados del sistema Android mediante OkHttp sin trust manager personalizado.
 
-Para `airef.es` se incluye la CA publica `AC Componentes Informaticos` de FNMT en `res/raw/fnmt_ac_componentes_informaticos.crt` y se declara en `network_security_config.xml`. Para el resto de URLs se usan las autoridades de certificacion del sistema Android.
+La app conserva compatibilidad adicional para un sitio publico con cadena FNMT que puede fallar en algunos dispositivos Android. Esa excepcion se aplica solo a `airef.es` y sus subdominios; el resto de dominios, como GitHub Pages o X, usan el cliente TLS estandar.
 
 ## Estructura
 
@@ -108,7 +103,7 @@ app/src/main/java/es/personal/avisosairef/
   data/parser/        Parser Jsoup y normalizacion
   data/storage/       Estado local DataStore
   data/repository/    Coordinacion de comprobaciones
-  notifications/      Canal y notificaciones
+  notifications/      Canal, Android y Telegram
   worker/             WorkManager
   ui/theme/           Tema Compose
   MainActivity.kt     Pantalla principal Compose
@@ -137,7 +132,7 @@ dist/RefrescoWeb.apk
 SHA-256:
 
 ```text
-53E7AF0F891A857D3C56DCCC5AB6246705B32999C3386EC71045ADFAAF3C9990
+1473BC713A8C73E3E75C8DC672AAC010608625C99F883AA9F27E72F666076881
 ```
 
 Calcular hash local:
@@ -155,10 +150,9 @@ Get-FileHash .\dist\RefrescoWeb.apk -Algorithm SHA256
 5. Retira ese permiso si quieres.
 6. Abre "Refresco Web".
 7. Concede notificaciones si Android lo pide.
-8. Activa la revision.
-9. Pulsa "Comprobar ahora" para crear la referencia inicial.
-
-Si vienes de la version anterior, Android deberia tratarlo como actualizacion porque se mantiene el mismo `applicationId` y la misma firma.
+8. Activa **Comprobaciones automaticas**.
+9. Anade o edita una pagina.
+10. Pulsa **Refrescar** en esa tarjeta para crear la referencia inicial.
 
 ## Instalacion mediante ADB
 
@@ -204,11 +198,9 @@ Casos cubiertos por tests:
 - selector CSS y palabras clave opcionales;
 - enlace nuevo detectado;
 - enlace nuevo en otro bloque detectado en modo pagina completa;
-- enlace nuevo en otro bloque ignorado cuando el filtro opcional esta activado;
 - duplicados;
 - URL relativa;
 - cambio de orden;
-- ausencia del apartado opcional;
 - lista vacia inesperada;
 - error de red sin borrar estado anterior;
 - estructura HTML moderadamente distinta.

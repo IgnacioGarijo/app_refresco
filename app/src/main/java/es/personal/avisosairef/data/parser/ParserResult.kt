@@ -6,7 +6,7 @@ sealed interface ParserResult {
 }
 
 enum class ParserFailureReason {
-    TargetSectionMissing,
+    SelectionMissing,
     EmptyUnexpected,
     ImplausibleResult
 }

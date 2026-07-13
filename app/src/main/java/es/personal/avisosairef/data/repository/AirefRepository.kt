@@ -35,9 +35,19 @@ class AirefRepository(
         }
     }
 
+    suspend fun updateDefaultSettings(defaultIntervalMinutes: Long) {
+        store.update { it.copy(defaultIntervalMinutes = defaultIntervalMinutes.coerceAtLeast(15)) }
+    }
+
     suspend fun selectMonitor(monitorId: String) {
         store.update { state ->
             if (state.monitors.any { it.id == monitorId }) state.copy(selectedMonitorId = monitorId) else state
+        }
+    }
+
+    suspend fun setMonitorEnabled(monitorId: String, enabled: Boolean) {
+        store.update { state ->
+            state.copy(monitors = state.monitors.map { if (it.id == monitorId) it.copy(enabled = enabled) else it })
         }
     }
 
@@ -48,7 +58,6 @@ class AirefRepository(
         url: String,
         intervalMinutes: Long,
         enabled: Boolean,
-        sectionFilterEnabled: Boolean,
         cssSelector: String,
         includeKeywords: String
     ): String {
@@ -67,7 +76,6 @@ class AirefRepository(
                     monitoredUrl = cleanUrl,
                     intervalMinutes = intervalMinutes,
                     enabled = enabled,
-                    sectionFilterEnabled = sectionFilterEnabled,
                     cssSelector = cssSelector.trim(),
                     includeKeywords = includeKeywords.trim()
                 )
@@ -79,7 +87,6 @@ class AirefRepository(
                     monitoredUrl = cleanUrl,
                     intervalMinutes = intervalMinutes,
                     enabled = enabled,
-                    sectionFilterEnabled = sectionFilterEnabled,
                     cssSelector = cssSelector.trim(),
                     includeKeywords = includeKeywords.trim(),
                     knownPublications = if (urlChanged) emptyList() else existing.knownPublications,
@@ -169,12 +176,10 @@ class AirefRepository(
     }
 
     private suspend fun handleHtml(monitor: WebMonitor, fetch: FetchResult.Success, now: Long): CheckOutcome {
-        val targetSection = if (monitor.sectionFilterEnabled) Constants.TargetSection else null
         return when (val parsed = parser.parse(
             fetch.html,
             monitor.monitoredUrl,
             previousKnownCount = monitor.knownPublications.size,
-            targetTitle = targetSection,
             cssSelector = monitor.cssSelector,
             includeKeywords = monitor.includeKeywords
         )) {

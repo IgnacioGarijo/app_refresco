@@ -10,10 +10,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,8 +24,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,8 +57,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
+import kotlin.math.absoluteValue
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,7 +76,7 @@ class MainViewModel(
     private val repository: es.personal.avisosairef.data.repository.AirefRepository
 ) : ViewModel() {
     val state: StateFlow<AppState> = repository.state.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppState())
-    var checking by mutableStateOf(false)
+    var checkingId by mutableStateOf<String?>(null)
         private set
     var settingsError by mutableStateOf<String?>(null)
         private set
@@ -93,12 +92,11 @@ class MainViewModel(
         }
     }
 
-    fun updateTelegram(enabled: Boolean, botToken: String, chatId: String) {
-        viewModelScope.launch { repository.updateTelegramSettings(enabled, botToken, chatId) }
-    }
-
-    fun selectMonitor(id: String) {
-        viewModelScope.launch { repository.selectMonitor(id) }
+    fun updateSettings(defaultIntervalMinutes: Long, telegramEnabled: Boolean, botToken: String, chatId: String) {
+        viewModelScope.launch {
+            repository.updateDefaultSettings(defaultIntervalMinutes)
+            repository.updateTelegramSettings(telegramEnabled, botToken, chatId)
+        }
     }
 
     fun saveMonitor(context: android.content.Context, draft: MonitorDraft) {
@@ -108,11 +106,10 @@ class MainViewModel(
                 repository.upsertMonitor(
                     id = draft.id,
                     name = draft.name,
-                    folder = draft.folder,
+                    folder = draft.type,
                     url = draft.url,
                     intervalMinutes = draft.intervalMinutes,
                     enabled = draft.enabled,
-                    sectionFilterEnabled = draft.sectionFilterEnabled,
                     cssSelector = draft.cssSelector,
                     includeKeywords = draft.includeKeywords
                 )
@@ -121,6 +118,15 @@ class MainViewModel(
                 }
             }.onFailure {
                 settingsError = it.message ?: "No se pudieron guardar los ajustes."
+            }
+        }
+    }
+
+    fun setMonitorEnabled(context: android.content.Context, id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setMonitorEnabled(id, enabled)
+            if (state.value.monitoringEnabled) {
+                AirefWorkScheduler.schedulePeriodic(context, repository.nextPeriodicIntervalMinutes(state.value))
             }
         }
     }
@@ -136,14 +142,10 @@ class MainViewModel(
 
     fun checkNow(monitorId: String) {
         viewModelScope.launch {
-            checking = true
+            checkingId = monitorId
             runCatching { repository.checkNow(monitorId) }
-            checking = false
+            checkingId = null
         }
-    }
-
-    fun resetReference(monitorId: String) {
-        viewModelScope.launch { repository.resetReference(monitorId) }
     }
 
     companion object {
@@ -158,11 +160,10 @@ class MainViewModel(
 data class MonitorDraft(
     val id: String?,
     val name: String,
-    val folder: String,
+    val type: String,
     val url: String,
     val intervalMinutes: Long,
     val enabled: Boolean,
-    val sectionFilterEnabled: Boolean,
     val cssSelector: String,
     val includeKeywords: String
 ) {
@@ -170,23 +171,21 @@ data class MonitorDraft(
         fun from(monitor: WebMonitor): MonitorDraft = MonitorDraft(
             id = monitor.id,
             name = monitor.name,
-            folder = monitor.folder,
+            type = monitor.folder,
             url = monitor.monitoredUrl,
             intervalMinutes = monitor.intervalMinutes,
             enabled = monitor.enabled,
-            sectionFilterEnabled = monitor.sectionFilterEnabled,
             cssSelector = monitor.cssSelector,
             includeKeywords = monitor.includeKeywords
         )
 
-        fun empty(): MonitorDraft = MonitorDraft(
+        fun empty(defaultIntervalMinutes: Long): MonitorDraft = MonitorDraft(
             id = null,
             name = "",
-            folder = "Personal",
+            type = "General",
             url = "https://",
-            intervalMinutes = 30,
+            intervalMinutes = defaultIntervalMinutes,
             enabled = true,
-            sectionFilterEnabled = false,
             cssSelector = "",
             includeKeywords = ""
         )
@@ -197,12 +196,9 @@ data class MonitorDraft(
 private fun WebRefreshScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    val selected = state.selectedMonitor
-    var showResetDialog by remember { mutableStateOf(false) }
     var editDraft by remember { mutableStateOf<MonitorDraft?>(null) }
     var deleteTarget by remember { mutableStateOf<WebMonitor?>(null) }
-    var telegramToken by remember { mutableStateOf(state.telegramBotToken) }
-    var telegramChatId by remember { mutableStateOf(state.telegramChatId) }
+    var showSettings by remember { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     LaunchedEffect(state.monitoringEnabled) {
@@ -214,9 +210,6 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
         }
     }
 
-    LaunchedEffect(state.telegramBotToken) { telegramToken = state.telegramBotToken }
-    LaunchedEffect(state.telegramChatId) { telegramChatId = state.telegramChatId }
-
     Scaffold { padding ->
         LazyColumn(
             modifier = Modifier
@@ -226,120 +219,43 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("${state.monitors.size} paginas configuradas", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text("${state.monitors.size} paginas configuradas", style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedButton(onClick = { showSettings = true }) { Text("Ajustes") }
+                }
             }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.monitoring_active), fontWeight = FontWeight.SemiBold)
+                            Text("Comprobaciones automaticas", fontWeight = FontWeight.SemiBold)
                             Switch(checked = state.monitoringEnabled, onCheckedChange = { viewModel.setMonitoring(context, it) })
                         }
-                        Text("Android puede retrasar las comprobaciones. Cada pagina usa su propia frecuencia aproximada.")
+                        Text("Activa o detiene todas las revisiones en segundo plano.")
                     }
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { editDraft = MonitorDraft.empty() }) { Text("Anadir pagina") }
-                    OutlinedButton(onClick = { editDraft = MonitorDraft.from(selected) }) { Text("Editar seleccionada") }
+                Button(onClick = { editDraft = MonitorDraft.empty(state.defaultIntervalMinutes) }) {
+                    Text("Anadir pagina")
                 }
             }
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text("Avisos por Telegram", fontWeight = FontWeight.SemiBold)
-                            Switch(
-                                checked = state.telegramEnabled,
-                                onCheckedChange = { viewModel.updateTelegram(it, telegramToken, telegramChatId) }
-                            )
-                        }
-                        OutlinedTextField(
-                            value = telegramToken,
-                            onValueChange = { telegramToken = it },
-                            label = { Text("Bot token") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        OutlinedTextField(
-                            value = telegramChatId,
-                            onValueChange = { telegramChatId = it },
-                            label = { Text("Chat ID") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { viewModel.updateTelegram(state.telegramEnabled, telegramToken, telegramChatId) }) {
-                                Text("Guardar Telegram")
-                            }
-                        }
-                        Text("Opcional. Se envia directamente a api.telegram.org cuando hay novedades; no se usa servidor propio.")
-                    }
-                }
-            }
-            state.monitors.groupBy { it.folder.ifBlank { "Personal" } }.forEach { (folder, monitors) ->
-                item { Text(folder, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-                items(monitors, key = { it.id }) { monitor ->
-                    MonitorCard(
-                        monitor = monitor,
-                        selected = monitor.id == selected.id,
-                        onSelect = { viewModel.selectMonitor(monitor.id) },
-                        onEdit = { editDraft = MonitorDraft.from(monitor) },
-                        onDelete = { deleteTarget = monitor }
+            state.monitors.groupBy { it.folder.ifBlank { "General" } }.forEach { (type, monitors) ->
+                item {
+                    TypeCard(
+                        type = type,
+                        color = colorForType(type),
+                        monitors = monitors,
+                        checkingId = viewModel.checkingId,
+                        onEdit = { editDraft = MonitorDraft.from(it) },
+                        onRefresh = { viewModel.checkNow(it.id) },
+                        onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.monitoredUrl))) },
+                        onDelete = { deleteTarget = it },
+                        onEnabledChange = { monitor, enabled -> viewModel.setMonitorEnabled(context, monitor.id, enabled) }
                     )
-                }
-            }
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(selected.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        Text(selected.monitoredUrl, style = MaterialTheme.typography.bodySmall)
-                        Text("Estado actual: ${statusText(state, selected)}", fontWeight = FontWeight.SemiBold)
-                        Text("Ultima comprobacion intentada: ${selected.lastAttemptAtMillis.formatDate()}")
-                        Text("Ultima comprobacion correcta: ${selected.lastSuccessAtMillis.formatDate()}")
-                        Text("Resultado: ${selected.lastResult}")
-                        Text("Ultimo cambio detectado: ${selected.lastChangeAtMillis.formatDate()}")
-                        Text("Enlaces conocidos: ${selected.knownPublications.size}")
-                        selected.lastError?.let { Text("Ultimo error: $it", color = MaterialTheme.colorScheme.error) }
-                    }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { viewModel.checkNow(selected.id) }, enabled = !viewModel.checking) {
-                        Text(stringResource(R.string.check_now))
-                    }
-                    OutlinedButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(selected.monitoredUrl)))
-                    }) {
-                        Text(stringResource(R.string.open_page))
-                    }
-                }
-                if (viewModel.checking) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CircularProgressIndicator(modifier = Modifier.height(24.dp))
-                        Text("Comprobando...")
-                    }
-                }
-            }
-            item { Text("Ultimos cambios de ${selected.name}", style = MaterialTheme.typography.titleMedium) }
-            if (selected.recentPublications.isEmpty()) {
-                item { Text("Aun no hay novedades posteriores a la referencia inicial.") }
-            } else {
-                items(selected.recentPublications) { publication ->
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(publication.title, fontWeight = FontWeight.SemiBold)
-                            Text(publication.type ?: "Enlace", style = MaterialTheme.typography.bodySmall)
-                            Text(publication.url, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-            item {
-                TextButton(onClick = { showResetDialog = true }) {
-                    Text(stringResource(R.string.reset_reference))
                 }
             }
         }
@@ -353,6 +269,17 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
             onSave = {
                 viewModel.saveMonitor(context, it)
                 editDraft = null
+            }
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            state = state,
+            onDismiss = { showSettings = false },
+            onSave = { defaultInterval, telegramEnabled, token, chatId ->
+                viewModel.updateSettings(defaultInterval, telegramEnabled, token, chatId)
+                showSettings = false
             }
         )
     }
@@ -371,44 +298,66 @@ private fun WebRefreshScreen(viewModel: MainViewModel) {
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.cancel)) } }
         )
     }
+}
 
-    if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = { Text(stringResource(R.string.reset_confirm_title)) },
-            text = { Text(stringResource(R.string.reset_confirm_body)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showResetDialog = false
-                    viewModel.resetReference(selected.id)
-                }) { Text(stringResource(R.string.confirm)) }
-            },
-            dismissButton = { TextButton(onClick = { showResetDialog = false }) { Text(stringResource(R.string.cancel)) } }
-        )
+@Composable
+private fun TypeCard(
+    type: String,
+    color: Color,
+    monitors: List<WebMonitor>,
+    checkingId: String?,
+    onEdit: (WebMonitor) -> Unit,
+    onRefresh: (WebMonitor) -> Unit,
+    onOpen: (WebMonitor) -> Unit,
+    onDelete: (WebMonitor) -> Unit,
+    onEnabledChange: (WebMonitor, Boolean) -> Unit
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(color)
+            )
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(type, fontWeight = FontWeight.Bold, color = color)
+                monitors.forEach { monitor ->
+                    PageCard(
+                        monitor = monitor,
+                        isChecking = checkingId == monitor.id,
+                        onEdit = { onEdit(monitor) },
+                        onRefresh = { onRefresh(monitor) },
+                        onOpen = { onOpen(monitor) },
+                        onDelete = { onDelete(monitor) },
+                        onEnabledChange = { onEnabledChange(monitor, it) }
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun MonitorCard(
+private fun PageCard(
     monitor: WebMonitor,
-    selected: Boolean,
-    onSelect: () -> Unit,
+    isChecking: Boolean,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onRefresh: () -> Unit,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    onEnabledChange: (Boolean) -> Unit
 ) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.weight(1f)) {
-                    Text(monitor.name, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold)
-                    Text("${monitor.intervalMinutes.intervalLabel()} · ${if (monitor.enabled) "activa" else "pausada"} · ${monitor.knownPublications.size} enlaces", style = MaterialTheme.typography.bodySmall)
-                }
-                if (selected) Text("Seleccionada", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                Text(monitor.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Switch(checked = monitor.enabled, onCheckedChange = onEnabledChange)
             }
-            Text(monitor.monitoredUrl, style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSelect) { Text("Ver") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = onEdit) { Text("Editar") }
+                OutlinedButton(onClick = onRefresh, enabled = !isChecking) { Text(if (isChecking) "..." else "Refrescar") }
+                OutlinedButton(onClick = onOpen) { Text("Abrir") }
                 TextButton(onClick = onDelete) { Text("Eliminar") }
             }
         }
@@ -423,11 +372,10 @@ private fun MonitorEditorDialog(
     onSave: (MonitorDraft) -> Unit
 ) {
     var name by remember { mutableStateOf(initial.name) }
-    var folder by remember { mutableStateOf(initial.folder) }
+    var type by remember { mutableStateOf(initial.type) }
     var url by remember { mutableStateOf(initial.url) }
     var interval by remember { mutableStateOf(initial.intervalMinutes) }
     var enabled by remember { mutableStateOf(initial.enabled) }
-    var sectionFilter by remember { mutableStateOf(initial.sectionFilterEnabled) }
     var cssSelector by remember { mutableStateOf(initial.cssSelector) }
     var includeKeywords by remember { mutableStateOf(initial.includeKeywords) }
 
@@ -436,8 +384,8 @@ private fun MonitorEditorDialog(
         title = { Text(if (initial.id == null) "Anadir pagina" else "Editar pagina") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = folder, onValueChange = { folder = it }, label = { Text("Carpeta o etiqueta") }, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre de la tarjeta") }, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = type, onValueChange = { type = it }, label = { Text("Tipo") }, modifier = Modifier.fillMaxWidth()) }
                 item { OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("URL HTTPS") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4) }
                 item {
                     Text("Frecuencia aproximada", fontWeight = FontWeight.SemiBold)
@@ -449,9 +397,9 @@ private fun MonitorEditorDialog(
                     }
                 }
                 item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = enabled, onCheckedChange = { enabled = it })
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Text("Pagina activa")
+                        Switch(checked = enabled, onCheckedChange = { enabled = it })
                     }
                 }
                 item {
@@ -472,12 +420,6 @@ private fun MonitorEditorDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = sectionFilter, onCheckedChange = { sectionFilter = it })
-                        Text("Usar filtro AIReF preconfigurado")
-                    }
-                }
                 error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             }
         },
@@ -487,11 +429,10 @@ private fun MonitorEditorDialog(
                     MonitorDraft(
                         id = initial.id,
                         name = name,
-                        folder = folder,
+                        type = type,
                         url = url,
                         intervalMinutes = interval,
                         enabled = enabled,
-                        sectionFilterEnabled = sectionFilter,
                         cssSelector = cssSelector,
                         includeKeywords = includeKeywords
                     )
@@ -502,15 +443,50 @@ private fun MonitorEditorDialog(
     )
 }
 
-private fun statusText(state: AppState, monitor: WebMonitor): String = when {
-    !state.monitoringEnabled || !monitor.enabled -> "detenida"
-    monitor.lastError != null -> "error"
-    monitor.knownPublications.isEmpty() -> "referencia pendiente"
-    else -> "activa"
-}
+@Composable
+private fun SettingsDialog(
+    state: AppState,
+    onDismiss: () -> Unit,
+    onSave: (Long, Boolean, String, String) -> Unit
+) {
+    var defaultInterval by remember { mutableStateOf(state.defaultIntervalMinutes) }
+    var telegramEnabled by remember { mutableStateOf(state.telegramEnabled) }
+    var telegramToken by remember { mutableStateOf(state.telegramBotToken) }
+    var telegramChatId by remember { mutableStateOf(state.telegramChatId) }
 
-private fun Long?.formatDate(): String =
-    this?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) } ?: "Nunca"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ajustes") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item {
+                    Text("Frecuencia por defecto", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        intervalOptions.forEach { option ->
+                            if (defaultInterval == option) Button(onClick = { defaultInterval = option }) { Text(option.intervalLabel()) }
+                            else OutlinedButton(onClick = { defaultInterval = option }) { Text(option.intervalLabel()) }
+                        }
+                    }
+                }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text("Avisos por Telegram")
+                        Switch(checked = telegramEnabled, onCheckedChange = { telegramEnabled = it })
+                    }
+                }
+                item { OutlinedTextField(value = telegramToken, onValueChange = { telegramToken = it }, label = { Text("Bot token") }, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = telegramChatId, onValueChange = { telegramChatId = it }, label = { Text("Chat ID") }, modifier = Modifier.fillMaxWidth()) }
+                item { Text("Telegram es opcional y envia los avisos directamente desde el telefono.") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(defaultInterval, telegramEnabled, telegramToken, telegramChatId) }) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
+    )
+}
 
 private val intervalOptions = listOf(15L, 30L, 60L, 120L)
 
@@ -520,4 +496,16 @@ private fun Long.intervalLabel(): String = when (this) {
     60L -> "1 h"
     120L -> "2 h"
     else -> "$this min"
+}
+
+private fun colorForType(type: String): Color {
+    val palette = listOf(
+        Color(0xFF063347),
+        Color(0xFF2F6F73),
+        Color(0xFF4F6F52),
+        Color(0xFF6B5B7A),
+        Color(0xFF8A5A44),
+        Color(0xFF3F5F8A)
+    )
+    return palette[type.lowercase().hashCode().absoluteValue % palette.size]
 }

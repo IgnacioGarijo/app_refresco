@@ -87,7 +87,6 @@ class AirefRepositoryTest {
             url = "https://example.com",
             intervalMinutes = 60,
             enabled = true,
-            sectionFilterEnabled = false,
             cssSelector = "",
             includeKeywords = ""
         )

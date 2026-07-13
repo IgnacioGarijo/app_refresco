@@ -12,7 +12,8 @@ data class AppState(
     val monitoringEnabled: Boolean = true,
     val telegramEnabled: Boolean = false,
     val telegramBotToken: String = "",
-    val telegramChatId: String = ""
+    val telegramChatId: String = "",
+    val defaultIntervalMinutes: Long = Constants.DefaultIntervalMinutes
 ) {
     val selectedMonitor: WebMonitor
         get() = monitors.firstOrNull { it.id == selectedMonitorId } ?: monitors.firstOrNull() ?: WebMonitor.default()
@@ -26,7 +27,6 @@ data class WebMonitor(
     val monitoredUrl: String,
     val intervalMinutes: Long = Constants.DefaultIntervalMinutes,
     val enabled: Boolean = true,
-    val sectionFilterEnabled: Boolean = false,
     val cssSelector: String = "",
     val includeKeywords: String = "",
     val knownPublications: List<Publicacion> = emptyList(),
@@ -43,8 +43,8 @@ data class WebMonitor(
     companion object {
         fun default(): WebMonitor = WebMonitor(
             id = Constants.DefaultMonitorId,
-            name = "AIReF - Personal laboral fijo",
-            folder = "Convocatorias",
+            name = "Pagina de ejemplo",
+            folder = "General",
             monitoredUrl = Constants.DefaultPageUrl
         )
     }

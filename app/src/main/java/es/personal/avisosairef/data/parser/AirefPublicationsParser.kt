@@ -19,7 +19,7 @@ class AirefPublicationsParser {
         val links = if (cssSelector.isNotBlank()) {
             val selected = document.select(cssSelector)
             if (selected.isEmpty()) {
-                return ParserResult.Failure(ParserFailureReason.TargetSectionMissing, "No se encontro el selector CSS configurado.")
+                return ParserResult.Failure(ParserFailureReason.SelectionMissing, "No se encontro el selector CSS configurado.")
             }
             selected.flatMap { it.select("a[href]") }
         } else if (targetTitle.isNullOrBlank()) {
@@ -27,8 +27,8 @@ class AirefPublicationsParser {
         } else {
             val targetComparable = TextNormalizer.comparable(targetTitle)
             val targetElement = findTargetElement(document, targetComparable) ?: return ParserResult.Failure(
-                ParserFailureReason.TargetSectionMissing,
-                "No se encontro el apartado opcional configurado."
+                ParserFailureReason.SelectionMissing,
+                "No se encontro la zona configurada."
             )
             extractPrimary(targetElement, targetComparable) ?: extractFallback(targetElement)
         }

@@ -9,7 +9,7 @@ class AirefPublicationsParserTest {
     private val target = "Experto/a en evaluacion de politicas publicas"
 
     @Test
-    fun filteredModeExtractsOnlyTargetSection() {
+    fun optionalSelectionExtractsOnlyConfiguredArea() {
         val result = parser.parse(
             page(targetLinks = listOf("A" to "/docs/a.pdf", "B" to "https://www.boe.es/b.pdf")),
             targetTitle = target
@@ -29,7 +29,7 @@ class AirefPublicationsParserTest {
     fun newLinkInTargetIsVisible() {
         val old = (parser.parse(page(targetLinks = listOf("A" to "/docs/a.pdf"))) as ParserResult.Success).publications
         val new = (parser.parse(page(targetLinks = listOf("A" to "/docs/a.pdf", "Nuevo" to "/docs/nuevo.pdf"))) as ParserResult.Success).publications
-        assertEquals(listOf("https://www.airef.es/docs/nuevo.pdf"), new.filterNot { it.key in old.map { p -> p.key } }.map { it.url })
+        assertEquals(listOf("https://example.com/docs/nuevo.pdf"), new.filterNot { it.key in old.map { p -> p.key } }.map { it.url })
     }
 
     @Test
@@ -57,7 +57,7 @@ class AirefPublicationsParserTest {
     @Test
     fun relativeUrlBecomesAbsolute() {
         val result = parser.parse(page(targetLinks = listOf("Relativo" to "/wp-content/x.pdf"))) as ParserResult.Success
-        assertEquals("https://www.airef.es/wp-content/x.pdf", result.publications.first { it.title == "Relativo" }.url)
+        assertEquals("https://example.com/wp-content/x.pdf", result.publications.first { it.title == "Relativo" }.url)
     }
 
     @Test
@@ -70,7 +70,7 @@ class AirefPublicationsParserTest {
     @Test
     fun missingTargetFailsOnlyWhenFilterIsEnabled() {
         val result = parser.parse("<html><body><main><a href='/a.pdf'>A</a></main></body></html>", targetTitle = target)
-        assertTrue(result is ParserResult.Failure && result.reason == ParserFailureReason.TargetSectionMissing)
+        assertTrue(result is ParserResult.Failure && result.reason == ParserFailureReason.SelectionMissing)
     }
 
     @Test

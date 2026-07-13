@@ -23,7 +23,7 @@ class AirefStateStore(private val context: Context) : StateStore {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     override val state: Flow<AppState> = context.airefDataStore.data.map { prefs ->
-        prefs[STATE_JSON]?.let { runCatching { json.decodeFromString<AppState>(it) }.getOrNull() } ?: AppState()
+        (prefs[STATE_JSON]?.let { runCatching { json.decodeFromString<AppState>(it) }.getOrNull() } ?: AppState()).withoutLegacyLabels()
     }
 
     override suspend fun current(): AppState = state.first()
@@ -31,7 +31,7 @@ class AirefStateStore(private val context: Context) : StateStore {
     override suspend fun update(transform: (AppState) -> AppState): AppState {
         var updated = AppState()
         context.airefDataStore.edit { prefs ->
-            val current = prefs[STATE_JSON]?.let { runCatching { json.decodeFromString<AppState>(it) }.getOrNull() } ?: AppState()
+            val current = (prefs[STATE_JSON]?.let { runCatching { json.decodeFromString<AppState>(it) }.getOrNull() } ?: AppState()).withoutLegacyLabels()
             updated = transform(current)
             prefs[STATE_JSON] = json.encodeToString(updated)
         }
@@ -65,3 +65,17 @@ class AirefStateStore(private val context: Context) : StateStore {
         val STATE_JSON = stringPreferencesKey("state_json")
     }
 }
+
+private fun AppState.withoutLegacyLabels(): AppState =
+    copy(
+        monitors = monitors.map { monitor ->
+            if (monitor.id == "default_airef") {
+                monitor.copy(
+                    name = "Pagina principal",
+                    folder = "General"
+                )
+            } else {
+                monitor
+            }
+        }
+    )
